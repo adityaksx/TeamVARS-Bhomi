@@ -281,8 +281,7 @@ export default function BhoomiConsole() {
     return <main className="page-shell loading-shell">Loading case workspace…</main>;
   }
 
-  const extractedReady =
-    data.extraction_status === "completed" || Boolean(caseId);
+  const extractedReady = data.extraction_status === "completed";
 
   return (
     <main className="page-shell">
