@@ -118,7 +118,9 @@ button:disabled { cursor: not-allowed; }
 .source-viewer-head { display: flex; justify-content: space-between; gap: 12px; padding: 11px 12px; border-bottom: 1px solid var(--line); background: #fffdf8; }
 .source-viewer-head strong { display: block; margin-top: 4px; font-size: 12px; }
 .source-viewer-head > span { color: var(--muted); font-size: 10px; align-self: end; }
-.source-frame { display: block; width: 100%; height: 430px; border: 0; background: #e9e8e1; }
+.source-page { position: relative; width: 100%; max-height: 500px; overflow: auto; background: #d8d7d0; display: flex; justify-content: center; }
+.source-page-image { display: block; width: 100%; height: auto; object-fit: contain; }
+.source-highlight { position: absolute; border: 2px solid var(--accent); background: rgba(232, 95, 62, .13); box-shadow: 0 0 0 2px rgba(255,255,255,.78); pointer-events: none; }
 .source-viewer-note { padding: 9px 11px; color: var(--muted); font-size: 10px; line-height: 1.45; border-top: 1px solid var(--line); }
 .difference-callout { margin: 13px 20px 12px; padding: 12px; background: #f8f4ed; border: 1px solid #e4ddd0; display: flex; justify-content: space-between; gap: 15px; align-items: baseline; }
 .difference-callout span { color: #858177; font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
