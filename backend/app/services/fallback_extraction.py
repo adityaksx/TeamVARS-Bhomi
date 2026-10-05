@@ -6,6 +6,7 @@ import pymupdf
 
 from app.core.config import Settings
 from app.providers.factory import get_provider
+from app.providers.gemini import GeminiProvider
 
 
 def extract_text(path: Path) -> str:
@@ -48,22 +49,45 @@ async def extract_with_fallback(
     schema: str,
     preferred: str = 'auto',
 ) -> tuple[dict[str, Any], str]:
+    # Gemini can inspect the original PDF, including scanned/image-only pages.
+    if preferred == 'gemini' or (preferred in {'auto', 'fallback'} and settings.gemini_api_key):
+        if settings.gemini_api_key:
+            try:
+                provider = GeminiProvider(settings.gemini_api_key, settings.gemini_base_url, settings.gemini_model)
+                prompt = (
+                    'Extract the Uttar Pradesh land record into ONLY a JSON object matching this schema. '
+                    'Read both printed text and scanned/visual content. Preserve Hindi/English names and '
+                    'Gata/Khasra identifiers exactly. Do not infer missing values.\\n\\n'
+                    + schema
+                )
+                result = await provider.extract_pdf(path.read_bytes(), 'application/pdf', prompt)
+                return parse_json(result.text), result.provider
+            except Exception as exc:
+                gemini_error = f'gemini: {exc}'
+        else:
+            gemini_error = 'gemini: GEMINI_API_KEY is not configured'
+    else:
+        gemini_error = ''
+
     text = extract_text(path)
     if not text.strip():
+        if gemini_error:
+            raise RuntimeError(f'AI extraction fallback failed: {gemini_error}; no machine-readable PDF text available for secondary fallback')
         raise RuntimeError('No machine-readable PDF text available for AI fallback extraction')
-    if preferred in {'nvidia', 'ollama', 'local'}:
+
+    if preferred in {'grok', 'ollama', 'local'}:
         candidates = [preferred]
     else:
         candidates = []
-        if settings.nvidia_api_key:
-            candidates.append('nvidia')
+        if settings.grok_api_key:
+            candidates.append('grok')
         candidates.append('ollama')
     prompt = (
         'Extract the Uttar Pradesh land record into ONLY a JSON object matching this schema. '
         'Preserve Hindi/English names and Gata/Khasra identifiers exactly. Do not infer missing values.\n\n'
         + schema + '\n\nDOCUMENT TEXT:\n' + text[:60000]
     )
-    errors = []
+    errors = [gemini_error] if gemini_error else []
     for name in candidates:
         try:
             provider = get_provider(settings, name)
