@@ -87,8 +87,8 @@ def reconcile_documents(documents: list[dict[str, Any]]) -> list[Finding]:
     if len(surveys) >= 2 and len({normalize_survey(value) for _, value in surveys}) > 1:
         findings.append(Finding(
             id=_finding_id(len(findings) + 1), kind="survey_mismatch", severity="medium",
-            title="Survey identifier differs",
-            summary="At least two uploaded records identify the parcel differently.",
+            title="Gata / Khasra identifier differs",
+            summary="At least two supplied records identify the parcel differently by Gata/Khasra/plot identifier.",
             score_impact=20, confidence=0.96,
             verification_action="Verify the Gata/Khasra and subdivision number against the authoritative revenue/cadastral record and registered deed.",
             evidence=[_evidence(doc, "survey_number", value) for doc, value in surveys],
@@ -122,12 +122,20 @@ def build_coverage(documents: list[dict[str, Any]]) -> list[dict[str, str]]:
         f"{d.get('filename', '')} {d.get('normalized', {}).get('document_type', '')}".casefold()
         for d in documents
     ).replace("-", "_")
+
+    def present(label: str, tokens: tuple[str, ...]) -> bool:
+        if label == "Gata / Khasra":
+            return any(
+                bool(d.get("normalized", {}).get("survey_number"))
+                or bool(d.get("normalized", {}).get("plot_number"))
+                for d in documents
+            ) or any(token in text for token in tokens)
+        return any(token.replace(" ", "_") in text or token in text for token in tokens)
+
     return [
         {
             "name": label,
-            "status": "present"
-            if any(token.replace(" ", "_") in text or token in text for token in tokens)
-            else "missing",
+            "status": "present" if present(label, tokens) else "missing",
         }
         for label, tokens in EXPECTED_DOCUMENTS
     ]
