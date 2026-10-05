@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 
 Severity = Literal["high", "medium", "low"]
+ResolutionState = Literal["auto-match", "ambiguous", "conflict"]
 
 
 class Evidence(BaseModel):
@@ -14,6 +15,16 @@ class Evidence(BaseModel):
     value: Any
 
 
+class EntityResolution(BaseModel):
+    left_document_id: str
+    right_document_id: str
+    left_value: str
+    right_value: str
+    similarity: float = Field(ge=0, le=1)
+    state: ResolutionState
+    rationale: str
+
+
 class Finding(BaseModel):
     id: str
     kind: str
@@ -22,6 +33,9 @@ class Finding(BaseModel):
     summary: str
     score_impact: int
     evidence: list[Evidence] = Field(default_factory=list)
+    confidence: float = Field(default=1.0, ge=0, le=1)
+    verification_action: str = ""
+    resolutions: list[EntityResolution] = Field(default_factory=list)
 
 
 class PropertySnapshot(BaseModel):
