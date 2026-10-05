@@ -6,3 +6,5 @@ pydantic==2.12.5
 pydantic-settings==2.10.1
 pypdf>=5,<7
 pymupdf==1.28.2
+
+reportlab==5.0.1
