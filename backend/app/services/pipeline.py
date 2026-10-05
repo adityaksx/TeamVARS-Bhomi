@@ -8,6 +8,7 @@ import httpx
 from app.core.config import Settings
 from app.services import case_store
 from app.services.normalization import normalize_document
+from app.services.pdf_utils import split_pdf
 from app.services.rules import build_coverage, reconcile_documents
 
 EXTRACTION_SCHEMA = json.dumps(
@@ -62,7 +63,14 @@ def _fixture_for(filename: str) -> dict[str, Any]:
             }
         )
     elif "mutation" in name:
-        base.update({"document_type": "Mutation Extract", "transaction_date": "2021-04-02"})
+        base.update(
+            {
+                "document_type": "Mutation Extract",
+                "transaction_date": "2021-04-02",
+            }
+        )
+        if "mismatch" in name:
+            base["owner_names"] = ["Rajesh Kumar"]
     elif "ec" in name or "encumbrance" in name:
         base.update({"document_type": "Encumbrance Certificate"})
     elif "rtc" in name or "pahani" in name:
@@ -72,7 +80,54 @@ def _fixture_for(filename: str) -> dict[str, Any]:
     return base
 
 
-async def _submit_sarvam(settings: Settings, document: dict[str, Any]) -> dict[str, Any]:
+def _annotation_page(annotation: Any) -> int | None:
+    if not isinstance(annotation, dict):
+        return None
+    sources = annotation.get("sources")
+    if not isinstance(sources, list):
+        return None
+
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        page = source.get("page") or source.get("page_number") or source.get("pageIndex")
+        if isinstance(page, int):
+            return page + 1 if source.get("pageIndex") is not None else page
+    return None
+
+
+def _merge_chunk_results(
+    chunks: list[tuple[dict[str, Any], dict[str, Any], int]]
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, int]]:
+    merged: dict[str, Any] = {}
+    annotations: dict[str, Any] = {}
+    source_pages: dict[str, int] = {}
+
+    for result, chunk_annotations, page_offset in chunks:
+        for key, value in result.items():
+            if value in (None, "", []):
+                continue
+            if key not in merged or merged[key] in (None, "", []):
+                merged[key] = value
+            elif isinstance(merged[key], list) and isinstance(value, list):
+                merged[key] = list(dict.fromkeys(merged[key] + value))
+
+        if isinstance(chunk_annotations, dict):
+            for key, value in chunk_annotations.items():
+                annotations.setdefault(key, value)
+                page = _annotation_page(value)
+                if page is not None:
+                    adjusted = page + page_offset
+                    source_pages[key] = min(source_pages.get(key, adjusted), adjusted)
+
+    return merged, annotations, source_pages
+
+
+async def _submit_sarvam(
+    settings: Settings,
+    document: dict[str, Any],
+    path: Path,
+) -> dict[str, Any]:
     headers = {"api-subscription-key": settings.sarvam_api_key or ""}
     form = {
         "schema": EXTRACTION_SCHEMA,
@@ -82,9 +137,17 @@ async def _submit_sarvam(settings: Settings, document: dict[str, Any]) -> dict[s
         "auto_orient": "true",
         "model": "sarvam-vision-v1",
     }
-    path = Path(document["storage_path"])
     content = path.read_bytes()
-    files = [("file", (document["filename"], content, document["content_type"] or "application/octet-stream"))]
+    files = [
+        (
+            "file",
+            (
+                path.name,
+                content,
+                document["content_type"] or "application/pdf",
+            ),
+        )
+    ]
 
     async with httpx.AsyncClient(timeout=90) as client:
         response = await client.post(
@@ -102,10 +165,19 @@ async def _poll_sarvam(settings: Settings, job_id: str) -> dict[str, Any]:
     headers = {"api-subscription-key": settings.sarvam_api_key or ""}
     async with httpx.AsyncClient(timeout=60) as client:
         for _ in range(45):
-            status = await client.get(f"{base}/doc-ai/v1/job/{job_id}/status", headers=headers)
+            status = await client.get(
+                f"{base}/doc-ai/v1/job/{job_id}/status",
+                headers=headers,
+            )
             status.raise_for_status()
             payload = status.json()
-            if payload.get("status") in {"completed", "partially_completed", "failed", "rejected"}:
+
+            if payload.get("status") in {
+                "completed",
+                "partially_completed",
+                "failed",
+                "rejected",
+            }:
                 if payload.get("status") in {"failed", "rejected"}:
                     return payload
                 result = await client.get(
@@ -114,13 +186,15 @@ async def _poll_sarvam(settings: Settings, job_id: str) -> dict[str, Any]:
                 )
                 result.raise_for_status()
                 return result.json()
+
             await asyncio.sleep(2)
+
     return {"status": "timeout", "job_id": job_id}
 
 
 def _extract_result(payload: dict[str, Any]) -> dict[str, Any]:
     result = payload.get("result", payload)
-    if isinstance(result, dict) and "result" in result and isinstance(result["result"], dict):
+    if isinstance(result, dict) and isinstance(result.get("result"), dict):
         result = result["result"]
     return result if isinstance(result, dict) else {}
 
@@ -144,6 +218,20 @@ def build_dashboard(case: dict[str, Any], reasoning_provider: str = "mock") -> d
     first = normalized[0] if normalized else {}
     owners = [name for item in normalized for name in item.get("owner_names", [])]
 
+    timeline = []
+    for document in documents:
+        normalized_doc = document.get("normalized", {})
+        event_date = normalized_doc.get("transaction_date") or normalized_doc.get("document_date")
+        if event_date:
+            timeline.append(
+                {
+                    "date": str(event_date),
+                    "label": f"{normalized_doc.get('document_type') or document.get('filename', 'Document')} reviewed",
+                    "type": (normalized_doc.get("document_type") or "record").casefold(),
+                }
+            )
+    timeline.sort(key=lambda item: item["date"])
+
     return {
         "case_id": case["id"],
         "documents": len(documents),
@@ -164,41 +252,65 @@ def build_dashboard(case: dict[str, Any], reasoning_provider: str = "mock") -> d
         },
         "findings": [item.model_dump() for item in findings],
         "coverage": coverage,
-        "timeline": [],
+        "timeline": timeline,
         "extraction_status": case.get("status", "draft"),
         "reasoning_provider": reasoning_provider,
     }
 
 
-async def analyze_case(case_id: str, settings: Settings, reasoning_provider: str = "mock") -> None:
+async def analyze_case(
+    case_id: str,
+    settings: Settings,
+    reasoning_provider: str = "mock",
+) -> None:
     case = case_store.get_case(case_id)
     if not case:
         return
 
     case_store.update_case(case_id, status="processing", analysis=None)
-
     documents = list(case.get("documents", {}).values())
 
     try:
         for document in documents:
             if settings.sarvam_api_key:
-                submitted = await _submit_sarvam(settings, document)
-                job_id = submitted.get("job_id")
+                original = Path(document["storage_path"])
+                if original.suffix.casefold() == ".pdf":
+                    chunks = split_pdf(
+                        original,
+                        case_store.UPLOADS / case_id / f"{document['id']}_chunks",
+                    )
+                else:
+                    chunks = [type("Chunk", (), {
+                        "path": original,
+                        "start_page": 1,
+                        "end_page": 1,
+                    })()]
+
+                chunk_results = []
+                latest_job_id = None
+                for chunk in chunks:
+                    submitted = await _submit_sarvam(settings, document, chunk.path)
+                    latest_job_id = submitted.get("job_id")
+                    result_payload = await _poll_sarvam(settings, latest_job_id)
+                    extracted = _extract_result(result_payload)
+                    chunk_results.append(
+                        (
+                            extracted,
+                            result_payload.get("annotations", {}),
+                            chunk.start_page - 1,
+                        )
+                    )
+
+                merged, annotations, source_pages = _merge_chunk_results(chunk_results)
                 case_store.update_document(
                     case_id,
                     document["id"],
-                    status="processing",
-                    job_id=job_id,
-                )
-                result = await _poll_sarvam(settings, job_id)
-                extracted = _extract_result(result)
-                case_store.update_document(
-                    case_id,
-                    document["id"],
-                    status="completed" if result.get("status") not in {"failed", "rejected", "timeout"} else result.get("status"),
-                    extracted=extracted,
-                    normalized=normalize_document(extracted),
-                    annotations=result.get("annotations", {}),
+                    status="completed",
+                    job_id=latest_job_id,
+                    extracted=merged,
+                    normalized=normalize_document(merged),
+                    annotations=annotations,
+                    source_pages=source_pages,
                 )
             else:
                 extracted = _fixture_for(document["filename"])
@@ -208,11 +320,20 @@ async def analyze_case(case_id: str, settings: Settings, reasoning_provider: str
                     status="completed",
                     extracted=extracted,
                     normalized=normalize_document(extracted),
+                    source_pages={
+                        "owner_names": 1,
+                        "survey_number": 1,
+                        "land_extent": 1,
+                    },
                 )
 
         fresh = case_store.get_case(case_id) or case
         dashboard = build_dashboard(fresh, reasoning_provider)
-        case_store.update_case(case_id, status="completed", analysis=dashboard)
+        case_store.update_case(
+            case_id,
+            status="completed",
+            analysis=dashboard,
+        )
 
     except Exception as exc:
         case_store.update_case(
