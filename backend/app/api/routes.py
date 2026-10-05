@@ -71,6 +71,13 @@ async def config() -> dict:
         },
         "providers": [
             {
+                "id": "auto",
+                "label": "Auto · Sarvam → NVIDIA → Ollama",
+                "model": "automatic fallback",
+                "configured": True,
+                "note": "Uses Sarvam first, then NVIDIA, then local Ollama",
+            },
+            {
                 "id": "sarvam",
                 "label": "Sarvam AI",
                 "model": settings.sarvam_model,
