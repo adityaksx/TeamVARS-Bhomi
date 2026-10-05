@@ -13,6 +13,14 @@ from app.providers.factory import get_provider
 from app.services import case_store
 from app.services.document_view import render_page
 from app.services.pipeline import analyze_case, build_dashboard
+from app.services.storage import materialize, read_bytes
+from app.services.upload_validation import (
+    UploadValidationError,
+    read_limited,
+    safe_filename,
+    validate_case_batch,
+    validate_file_signature,
+)
 from app.services.reporting import build_pdf_report
 from app.services.reconciliation import build_demo_dashboard
 
@@ -101,25 +109,46 @@ async def upload_case_documents(
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
-    allowed = {"application/pdf", "image/png", "image/jpeg", "image/jpg"}
-    uploaded = []
-    for file in files:
-        if file.content_type not in allowed:
-            raise HTTPException(
-                status_code=415,
-                detail=f"Unsupported file type for {file.filename}. Use PDF, PNG or JPEG.",
+    incoming = []
+    try:
+        for file in files:
+            content = await read_limited(
+                file,
+                settings.max_upload_mb * 1024 * 1024,
             )
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail=f"{file.filename} is empty")
-        uploaded.append(
-            case_store.add_document(
-                case_id,
-                file.filename or "document",
-                file.content_type or "application/octet-stream",
+            filename = safe_filename(file.filename)
+            detected_type = validate_file_signature(
+                filename,
+                file.content_type,
                 content,
             )
+            incoming.append((filename, detected_type, content))
+
+        existing_documents = list(case.get("documents", {}).values())
+        validate_case_batch(
+            existing_document_count=len(existing_documents),
+            existing_bytes=sum(int(item.get("size") or 0) for item in existing_documents),
+            incoming_sizes=(len(content) for _, _, content in incoming),
+            max_documents=settings.max_documents_per_case,
+            max_case_bytes=settings.max_case_upload_mb * 1024 * 1024,
         )
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    uploaded = []
+    try:
+        for filename, detected_type, content in incoming:
+            uploaded.append(
+                case_store.add_document(
+                    case_id,
+                    filename,
+                    detected_type,
+                    content,
+                )
+            )
+    except Exception:
+        case_store.update_case(case_id, status="failed")
+        raise
 
     case_store.update_case(case_id, status="ready")
     return {"case_id": case_id, "documents": uploaded}
@@ -167,32 +196,33 @@ async def document_page(case_id: str, document_id: str, page_number: int):
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    path = Path(document["storage_path"])
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Document file not found")
     if page_number < 1:
         raise HTTPException(status_code=400, detail="Page number must be at least 1")
 
+    storage_ref = document["storage_path"]
     content_type = document.get("content_type", "")
-    if content_type == "application/pdf":
-        try:
-            content, width, height = render_page(path, page_number)
-        except ValueError as exc:
-            raise HTTPException(status_code=416, detail=str(exc)) from exc
-        return StreamingResponse(
-            io.BytesIO(content),
-            media_type="image/png",
-            headers={"X-Page-Width": str(width), "X-Page-Height": str(height)},
-        )
+    try:
+        if content_type == "application/pdf":
+            with materialize(storage_ref) as path:
+                content, width, height = render_page(path, page_number)
+            return StreamingResponse(
+                io.BytesIO(content),
+                media_type="image/png",
+                headers={"X-Page-Width": str(width), "X-Page-Height": str(height)},
+            )
 
-    if page_number != 1:
-        raise HTTPException(status_code=416, detail="Image documents contain one page")
-    return FileResponse(
-        path,
-        media_type=content_type or "application/octet-stream",
-        filename=document.get("filename", path.name),
-        content_disposition_type="inline",
-    )
+        if page_number != 1:
+            raise HTTPException(status_code=416, detail="Image documents contain one page")
+        payload = read_bytes(storage_ref)
+        return StreamingResponse(
+            io.BytesIO(payload),
+            media_type=content_type or "application/octet-stream",
+            headers={"Content-Disposition": f'inline; filename="{document.get("filename", "document")}"'},
+        )
+    except HTTPException:
+        raise
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document file not found") from exc
 
 
 @router.get("/cases/{case_id}/documents/{document_id}/content")
@@ -205,15 +235,15 @@ async def document_content(case_id: str, document_id: str):
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    path = Path(document["storage_path"])
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Document file not found")
+    try:
+        payload = read_bytes(document["storage_path"])
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document file not found") from exc
 
-    return FileResponse(
-        path,
+    return StreamingResponse(
+        io.BytesIO(payload),
         media_type=document.get("content_type") or "application/octet-stream",
-        filename=document.get("filename", path.name),
-        content_disposition_type="inline",
+        headers={"Content-Disposition": f'inline; filename="{document.get("filename", "document")}"'},
     )
 
 
@@ -325,7 +355,20 @@ async def upload_for_extraction(
             "filename": file.filename,
         }
 
-    content = await file.read()
+    try:
+        content = await read_limited(
+            file,
+            settings.max_upload_mb * 1024 * 1024,
+        )
+        filename = safe_filename(file.filename)
+        detected_type = validate_file_signature(
+            filename,
+            file.content_type,
+            content,
+        )
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     headers = {"api-subscription-key": settings.sarvam_api_key}
     form = {
         "schema": schema,
@@ -339,9 +382,9 @@ async def upload_for_extraction(
         (
             "file",
             (
-                file.filename or "document",
+                filename,
                 content,
-                file.content_type or "application/octet-stream",
+                detected_type,
             ),
         )
     ]
