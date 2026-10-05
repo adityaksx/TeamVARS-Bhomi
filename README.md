@@ -15,7 +15,7 @@ Next.js light/editorial console
   v
 FastAPI
   |
-  +--> persistent local case store
+  +--> case store (local JSON or optional PostgreSQL)
   +--> document storage
   +--> Sarvam Document AI (when configured)
   +--> AI provider for explanations
@@ -89,10 +89,15 @@ AI_PROVIDER=mock
 
 SARVAM_API_KEY=
 SARVAM_MODEL=sarvam-105b
+SARVAM_DIGITISE_ENABLED=false
+SARVAM_DOCUMENT_LANGUAGE=en-IN
 
 OPENMODEL_API_KEY=
 OPENMODEL_MODEL=
 OPENMODEL_BASE_URL=https://api.openmodel.ai
+
+CASE_STORE_BACKEND=local
+DATABASE_URL=
 ```
 
 API keys stay server-side.
