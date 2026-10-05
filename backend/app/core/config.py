@@ -16,9 +16,13 @@ class Settings(BaseSettings):
     sarvam_document_language: str = "hi-IN"
     land_record_state: str = "UP"
 
-    nvidia_api_key: str | None = None
-    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
-    nvidia_model: str = "openai/gpt-oss-20b"
+    gemini_api_key: str | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    gemini_model: str = "gemini-2.5-flash"
+
+    grok_api_key: str | None = None
+    grok_base_url: str = "https://api.x.ai/v1"
+    grok_model: str = "grok-4.7"
 
     ollama_base_url: str = "http://localhost:11434/v1"
     ollama_model: str = "qwen2.5:7b-instruct"
