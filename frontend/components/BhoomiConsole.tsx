@@ -31,7 +31,7 @@ import {
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
 
-type Provider = "sarvam" | "nvidia" | "ollama" | "local" | "openmodel" | "mock";
+type Provider = "auto" | "sarvam" | "nvidia" | "ollama" | "local" | "openmodel" | "mock";
 
 type ProviderConfig = {
   id: Provider;
@@ -110,7 +110,7 @@ async function jsonFetch(path: string, init?: RequestInit) {
 
 export default function BhoomiConsole() {
   const [data, setData] = useState<Dashboard | null>(null);
-  const [provider, setProvider] = useState<Provider>("mock");
+  const [provider, setProvider] = useState<Provider>("auto");
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [activeFinding, setActiveFinding] = useState("F-001");
   const [question, setQuestion] = useState("");
@@ -135,7 +135,7 @@ export default function BhoomiConsole() {
       .then(([demo, config]) => {
         setData(demo);
         setProviders(config.providers ?? []);
-        setProvider((config.default_provider as Provider) ?? "mock");
+        setProvider((config.default_provider as Provider) ?? "auto");
       })
       .catch((error) => {
         setUploadStatus(
