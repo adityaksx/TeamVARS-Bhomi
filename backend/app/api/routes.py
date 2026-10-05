@@ -1,4 +1,7 @@
 import httpx
+import io
+
+from fastapi.responses import StreamingResponse
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
@@ -150,6 +153,49 @@ async def case_dashboard(case_id: str) -> dict:
         return case["analysis"]
 
     return build_dashboard(case, settings.ai_provider)
+
+
+@router.get("/cases/{case_id}/report")
+async def case_report(case_id: str):
+    case = case_store.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    dashboard = case.get("analysis") or build_dashboard(case, settings.ai_provider)
+
+    lines = [
+        "BHOOMILENS — EVIDENCE REVIEW REPORT",
+        f"Case: {case_id}",
+        "",
+        f"Record Consistency Score: {dashboard.get('score', '—')}/100",
+        f"Status: {dashboard.get('status', '—')}",
+        f"Documents reviewed: {dashboard.get('documents', 0)}",
+        "",
+        "PROPERTY SNAPSHOT",
+        *[f"{key.title()}: {value}" for key, value in dashboard.get("property", {}).items()],
+        "",
+        "FINDINGS",
+    ]
+    for finding in dashboard.get("findings", []):
+        lines.extend([
+            f"{finding['id']} [{finding['severity'].upper()}] {finding['title']}",
+            finding["summary"],
+            f"Confidence: {round(finding.get('confidence', 1) * 100)}%",
+            f"Verification: {finding.get('verification_action') or 'Review source documents.'}",
+        ])
+        for evidence in finding.get("evidence", []):
+            lines.append(f"  - {evidence['document']} p.{evidence['page']} · {evidence['field']}: {evidence['value']}")
+        lines.append("")
+
+    lines.extend([
+        "DISCLAIMER",
+        "AI-assisted screening only. This report does not establish legal title, ownership, fraud, or litigation status.",
+    ])
+    payload = ("\n".join(lines) + "\n").encode("utf-8")
+    return StreamingResponse(
+        io.BytesIO(payload),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="bhoomilens-{case_id}.txt"'},
+    )
 
 
 @router.post("/cases/{case_id}/explain")
