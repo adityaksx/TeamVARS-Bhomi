@@ -55,6 +55,9 @@ type Finding = {
   summary: string;
   score_impact: number;
   evidence: Evidence[];
+  confidence?: number;
+  verification_action?: string;
+  resolutions?: { left_value: string; right_value: string; similarity: number; state: string; rationale: string }[];
 };
 
 type Dashboard = {
@@ -76,6 +79,7 @@ type Dashboard = {
   timeline: { date: string; label: string; type: string }[];
   extraction_status?: string;
   reasoning_provider?: Provider;
+  confidence?: number;
 };
 
 const severityMeta = {
@@ -108,6 +112,7 @@ export default function BhoomiConsole() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [caseId, setCaseId] = useState("");
   const [analysisRunning, setAnalysisRunning] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -277,6 +282,26 @@ export default function BhoomiConsole() {
     }
   }
 
+  async function downloadReport() {
+    if (!caseId) return;
+    setReporting(true);
+    try {
+      const response = await fetch(`${API_BASE}/cases/${caseId}/report`);
+      if (!response.ok) throw new Error("Could not generate report.");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `bhoomilens-${caseId}.txt`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setUploadStatus(error instanceof Error ? error.message : "Could not generate report.");
+    } finally {
+      setReporting(false);
+    }
+  }
+
   if (!data) {
     return <main className="page-shell loading-shell">Loading case workspace…</main>;
   }
@@ -396,6 +421,7 @@ export default function BhoomiConsole() {
             <span>{data.status}</span>
             <span>{data.findings.length} findings</span>
           </div>
+          <div className="score-note">Finding confidence: {Math.round((data.confidence ?? 1) * 100)}%</div>
           <div className="score-note">
             {extractedReady
               ? "Computed from structured comparisons across this case."
@@ -511,6 +537,11 @@ export default function BhoomiConsole() {
 
               <p className="evidence-summary">{finding.summary}</p>
 
+              <div className="difference-callout">
+                <span>Confidence</span>
+                <strong>{Math.round((finding.confidence ?? 1) * 100)}%</strong>
+              </div>
+
               <div className="evidence-grid">
                 {finding.evidence.map((evidence, index) => (
                   <div
@@ -532,6 +563,11 @@ export default function BhoomiConsole() {
                     </div>
                   </div>
                 ))}
+              </div>
+
+              <div className="difference-callout">
+                <span>Verify next</span>
+                <strong>{finding.verification_action || "Review the original source records."}</strong>
               </div>
 
               <div className="difference-callout">
