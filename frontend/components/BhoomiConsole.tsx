@@ -113,6 +113,7 @@ export default function BhoomiConsole() {
   const [caseId, setCaseId] = useState("");
   const [analysisRunning, setAnalysisRunning] = useState(false);
   const [reporting, setReporting] = useState(false);
+  const [activeEvidence, setActiveEvidence] = useState<Evidence | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -132,6 +133,14 @@ export default function BhoomiConsole() {
       data?.findings[0],
     [activeFinding, data]
   );
+
+  useEffect(() => {
+    setActiveEvidence(finding?.evidence[0] ?? null);
+  }, [finding]);
+
+  function openEvidence(evidence: Evidence) {
+    setActiveEvidence(evidence);
+  }
 
   function handleFileSelect(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
@@ -543,27 +552,59 @@ export default function BhoomiConsole() {
               </div>
 
               <div className="evidence-grid">
-                {finding.evidence.map((evidence, index) => (
-                  <div
-                    className="evidence-card"
-                    key={`${evidence.document}-${index}`}
-                  >
-                    <div className="evidence-card-top">
-                      <FileCheck2 size={15} />
-                      <span>{evidence.document}</span>
-                      <span>p.{evidence.page}</span>
-                    </div>
-                    <div className="evidence-field">
-                      {evidence.field.replaceAll("_", " ")}
-                    </div>
-                    <div className="evidence-value">
-                      {typeof evidence.value === "string"
-                        ? evidence.value
-                        : JSON.stringify(evidence.value)}
-                    </div>
-                  </div>
-                ))}
+                {finding.evidence.map((evidence, index) => {
+                  const selected =
+                    activeEvidence?.document_id === evidence.document_id &&
+                    activeEvidence?.page === evidence.page &&
+                    activeEvidence?.field === evidence.field;
+                  return (
+                    <button
+                      className={`evidence-card ${selected ? "selected" : ""}`}
+                      key={`${evidence.document}-${index}`}
+                      type="button"
+                      onClick={() => openEvidence(evidence)}
+                      title="Open this source page"
+                    >
+                      <div className="evidence-card-top">
+                        <FileCheck2 size={15} />
+                        <span>{evidence.document}</span>
+                        <span>p.{evidence.page}</span>
+                      </div>
+                      <div className="evidence-field">
+                        {evidence.field.replaceAll("_", " ")}
+                      </div>
+                      <div className="evidence-value">
+                        {typeof evidence.value === "string"
+                          ? evidence.value
+                          : JSON.stringify(evidence.value)}
+                      </div>
+                      <div className="evidence-open-label">
+                        {selected ? "Source open" : "Open source page →"}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
+
+              {activeEvidence?.document_id && caseId && (
+                <div className="source-viewer">
+                  <div className="source-viewer-head">
+                    <div>
+                      <div className="mini-heading">SOURCE VIEWER</div>
+                      <strong>{activeEvidence.document} · page {activeEvidence.page}</strong>
+                    </div>
+                    <span>Field: {activeEvidence.field.replaceAll("_", " ")}</span>
+                  </div>
+                  <iframe
+                    className="source-frame"
+                    title={`Source document — ${activeEvidence.document}`}
+                    src={`${API_BASE}/cases/${caseId}/documents/${activeEvidence.document_id}/content#page=${activeEvidence.page}`}
+                  />
+                  <div className="source-viewer-note">
+                    The viewer opens the stored source at the cited page. The highlighted field value above is the extracted evidence; visual highlighting is added when document annotation coordinates are available.
+                  </div>
+                </div>
+              )}
 
               <div className="difference-callout">
                 <span>Verify next</span>
