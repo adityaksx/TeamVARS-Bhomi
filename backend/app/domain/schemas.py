@@ -51,7 +51,9 @@ class Finding(BaseModel):
 
 
 class PropertySnapshot(BaseModel):
+    state: str = "Uttar Pradesh"
     village: str = "Not established"
+    tehsil: str = "Not established"
     taluk: str = "Not established"
     district: str = "Not established"
     survey: str = "Not established"
