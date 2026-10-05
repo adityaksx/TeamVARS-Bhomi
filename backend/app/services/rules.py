@@ -1,13 +1,27 @@
 from typing import Any
 
-from app.domain.schemas import EntityResolution, Evidence, Finding
+from app.domain.schemas import EntityResolution, Evidence, EvidenceAnchor, Finding
 from app.services.entity_resolution import classify_name_match, similarity
 from app.services.normalization import normalize_survey
 
 EXPECTED_DOCUMENTS = [("RTC", "rtc"), ("Mutation", "mutation"), ("Sale Deed", "sale_deed"), ("Encumbrance Certificate", "encumbrance_certificate")]
 
 def _evidence(document: dict[str, Any], field: str, value: Any) -> Evidence:
-    return Evidence(document_id=document["id"], document=document.get("filename", document["id"]), page=int(document.get("source_pages", {}).get(field, 1)), field=field, value=value)
+    page = int(document.get("source_pages", {}).get(field, 1))
+    anchors = document.get("source_anchors", {}) or {}
+    anchor_key = f"{field}:{value.casefold()}" if field == "owner_names" and isinstance(value, str) else field
+    raw_anchor = anchors.get(anchor_key)
+    anchor = EvidenceAnchor.model_validate(raw_anchor) if isinstance(raw_anchor, dict) else None
+    if anchor:
+        page = anchor.page
+    return Evidence(
+        document_id=document["id"],
+        document=document.get("filename", document["id"]),
+        page=page,
+        field=field,
+        value=value,
+        anchor=anchor,
+    )
 
 def _finding_id(index: int) -> str:
     return f"F-{index:03d}"
