@@ -64,6 +64,16 @@ class ReconciliationTests(unittest.TestCase):
     def test_similar_names_are_ambiguous_not_automatically_equal(self):
         self.assertEqual(classify_name_match("ramesh kumar", "ramesh kumar singh"), "ambiguous")
 
+    def test_ambiguous_owner_finding_contains_resolution_and_action(self):
+        findings = reconcile_documents([
+            doc("1", "rtc.pdf", owner_names=["Ramesh Kumar"]),
+            doc("2", "mutation.pdf", owner_names=["Ramesh Kumar Singh"], document_type="Mutation Extract"),
+        ])
+        finding = next(item for item in findings if item.kind == "entity_ambiguity")
+        self.assertGreater(finding.confidence, 0)
+        self.assertTrue(finding.verification_action)
+        self.assertEqual(finding.resolutions[0].state, "ambiguous")
+
 
 if __name__ == "__main__":
     unittest.main()
