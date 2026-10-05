@@ -3,10 +3,10 @@ from fastapi import HTTPException
 from app.core.config import Settings
 from .base import AIProvider
 from .mock import MockProvider
-from .nvidia import NvidiaProvider
 from .ollama import OllamaProvider
 from .openmodel import OpenModelProvider
 from .sarvam import SarvamProvider
+from .gemini import GeminiProvider
 
 
 def get_provider(settings: Settings, override: str | None = None) -> AIProvider:
@@ -15,8 +15,10 @@ def get_provider(settings: Settings, override: str | None = None) -> AIProvider:
     if provider in {"auto", "fallback"}:
         if settings.sarvam_api_key:
             provider = "sarvam"
-        elif settings.nvidia_api_key:
-            provider = "nvidia"
+        elif settings.gemini_api_key:
+            provider = "gemini"
+        elif settings.grok_api_key:
+            provider = "grok"
         else:
             provider = "ollama"
 
@@ -32,14 +34,16 @@ def get_provider(settings: Settings, override: str | None = None) -> AIProvider:
             settings.sarvam_model,
         )
 
-    if provider == "nvidia":
-        if not settings.nvidia_api_key:
-            raise HTTPException(status_code=503, detail="NVIDIA_API_KEY is not configured")
-        return NvidiaProvider(
-            settings.nvidia_api_key,
-            settings.nvidia_base_url,
-            settings.nvidia_model,
-        )
+    if provider == "gemini":
+        if not settings.gemini_api_key:
+            raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not configured")
+        return GeminiProvider(settings.gemini_api_key, settings.gemini_base_url, settings.gemini_model)
+
+    if provider == "grok":
+        if not settings.grok_api_key:
+            raise HTTPException(status_code=503, detail="GROK_API_KEY is not configured")
+        from .openai_compatible import OpenAICompatibleProvider
+        return OpenAICompatibleProvider("grok", settings.grok_api_key, settings.grok_base_url, settings.grok_model)
 
     if provider in {"ollama", "local"}:
         return OllamaProvider(
