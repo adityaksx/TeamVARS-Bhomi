@@ -110,7 +110,8 @@ def build_pdf_report(case: dict[str, Any], dashboard: dict[str, Any]) -> bytes:
 
     property_data = dashboard.get("property", {})
     story += [Paragraph("Property snapshot", section)]
-    prop = [[key.replace("_", " ").title(), str(value)] for key, value in property_data.items()]
+    property_labels = {"survey": "Gata / Khasra", "taluk": "Tehsil", "state": "State"}
+    prop = [[property_labels.get(key, key.replace("_", " ").title()), str(value)] for key, value in property_data.items()]
     prop_table = Table(prop, colWidths=[43 * mm, 125 * mm])
     prop_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#faf9f4")),
