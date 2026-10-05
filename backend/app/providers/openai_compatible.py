@@ -4,7 +4,7 @@ from .base import AIProvider, AIResult
 
 
 class OpenAICompatibleProvider(AIProvider):
-    """Provider for OpenAI-compatible chat APIs such as NVIDIA NIM and Ollama."""
+    """Provider for OpenAI-compatible chat APIs such as Grok and Ollama."""
 
     def __init__(
         self,
@@ -29,7 +29,6 @@ class OpenAICompatibleProvider(AIProvider):
             ],
             "temperature": 0.2,
             "max_tokens": 4096,
-            "reasoning_effort": "low",
         }
         headers = {
             "Authorization": f"Bearer {self.api_key}",
