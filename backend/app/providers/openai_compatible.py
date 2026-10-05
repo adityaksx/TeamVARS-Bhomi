@@ -28,7 +28,8 @@ class OpenAICompatibleProvider(AIProvider):
                 {"role": "user", "content": user},
             ],
             "temperature": 0.2,
-            "max_tokens": 1800,
+            "max_tokens": 4096,
+            "reasoning_effort": "low",
         }
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -55,6 +56,14 @@ class OpenAICompatibleProvider(AIProvider):
         message = choices[0].get("message") or {}
         text = message.get("content") or ""
         if not text:
-            raise RuntimeError(f"{self.name} returned an empty response")
+            text = message.get("reasoning_content") or ""
+        if not text:
+            # Some OpenAI-compatible gateways expose a legacy top-level text field.
+            text = choices[0].get("text") or ""
+        if not text:
+            raise RuntimeError(
+                f"{self.name} returned an empty response: "
+                f"{data!r}"
+            )
 
         return AIResult(provider=self.name, model=self.model, text=text)
