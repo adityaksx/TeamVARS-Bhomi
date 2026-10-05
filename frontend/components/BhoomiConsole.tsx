@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleAlert,
+  Download,
   FileCheck2,
   FileText,
   Languages,
@@ -309,6 +310,26 @@ export default function BhoomiConsole() {
     }
   }
 
+  async function downloadPdfReport() {
+    if (!caseId) return;
+    setReporting(true);
+    try {
+      const response = await fetch(`${API_BASE}/cases/${caseId}/report/pdf`);
+      if (!response.ok) throw new Error("Could not generate PDF report.");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `bhoomilens-${caseId}.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setUploadStatus(error instanceof Error ? error.message : "Could not generate PDF report.");
+    } finally {
+      setReporting(false);
+    }
+  }
+
   async function downloadReport() {
     if (!caseId) return;
     setReporting(true);
@@ -388,6 +409,17 @@ export default function BhoomiConsole() {
           </p>
 
           <div className="hero-actions">
+            {caseId && data.extraction_status === "completed" && (
+              <button
+                className="report-button"
+                type="button"
+                onClick={downloadPdfReport}
+                disabled={reporting}
+              >
+                {reporting ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />}
+                Export PDF
+              </button>
+            )}
             <button
               className="primary-button"
               type="button"
