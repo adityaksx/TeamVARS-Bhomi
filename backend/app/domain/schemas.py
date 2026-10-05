@@ -7,12 +7,22 @@ Severity = Literal["high", "medium", "low"]
 ResolutionState = Literal["auto-match", "ambiguous", "conflict"]
 
 
+class EvidenceAnchor(BaseModel):
+    page: int = 1
+    page_width: float
+    page_height: float
+    bbox: list[float] = Field(min_length=4, max_length=4)
+    text: str = ""
+    method: str = "local-text-anchor"
+
+
 class Evidence(BaseModel):
     document_id: str
     document: str
     page: int = 1
     field: str
     value: Any
+    anchor: EvidenceAnchor | None = None
 
 
 class EntityResolution(BaseModel):
