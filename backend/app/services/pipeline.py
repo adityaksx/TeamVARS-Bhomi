@@ -167,7 +167,6 @@ async def _submit_sarvam(
         "schema": EXTRACTION_SCHEMA,
         "language": settings.sarvam_document_language,
         "output_format": "json",
-        "classification": "true",
     }
     content = path.read_bytes()
     files = [
