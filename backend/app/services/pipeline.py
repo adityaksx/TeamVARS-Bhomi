@@ -14,6 +14,7 @@ from app.services.pdf_utils import split_pdf
 from app.services.rules import build_coverage, reconcile_documents
 from app.adapters.uttar_pradesh import adapt_up_document
 from app.services.storage import materialize
+from app.services.fallback_extraction import extract_with_fallback
 
 EXTRACTION_SCHEMA = json.dumps(
     {
@@ -479,57 +480,39 @@ async def analyze_case(
                     digitise_results = []
                     latest_job_id = None
 
+                    extraction_provider = 'sarvam'
+                    merged = None
+                    annotations = {}
+                    source_pages = {}
+
                     if settings.sarvam_api_key:
-                        for chunk in chunks:
-                            submitted = await _submit_sarvam(settings, document, chunk.path)
-                            latest_job_id = submitted.get("job_id")
-                            if not latest_job_id:
-                                raise RuntimeError(
-                                    f"Sarvam extraction did not return a job ID for {document['filename']}."
-                                )
+                        try:
+                            for chunk in chunks:
+                                submitted = await _submit_sarvam(settings, document, chunk.path)
+                                latest_job_id = submitted.get('job_id')
+                                if not latest_job_id:
+                                    raise RuntimeError(f'Sarvam extraction did not return a job ID for {document["filename"]}.')
+                                result_payload = await _poll_sarvam(settings, latest_job_id)
+                                extracted = _extract_result(result_payload)
+                                chunk_results.append((extracted, result_payload.get('annotations', {}), chunk.start_page - 1))
+                                if settings.sarvam_digitise_enabled and is_pdf:
+                                    digitise_job = await _submit_sarvam_digitise(settings, document, chunk.path)
+                                    digitise_job_id = digitise_job.get('job_id')
+                                    if digitise_job_id:
+                                        digitise_results.append((await _poll_sarvam_digitise(settings, digitise_job_id), chunk.start_page - 1))
+                            merged, annotations, source_pages = _merge_chunk_results(chunk_results)
+                        except Exception:
+                            merged = None
 
-                            result_payload = await _poll_sarvam(settings, latest_job_id)
-                            extracted = _extract_result(result_payload)
-                            chunk_results.append(
-                                (
-                                    extracted,
-                                    result_payload.get("annotations", {}),
-                                    chunk.start_page - 1,
-                                )
-                            )
+                    if not merged:
+                        merged, extraction_provider = await extract_with_fallback(
+                            settings, original, EXTRACTION_SCHEMA,
+                            'nvidia' if settings.nvidia_api_key else 'ollama',
+                        )
+                        source_pages = {'owner_names': 1, 'survey_number': 1, 'land_extent': 1}
 
-                            if settings.sarvam_digitise_enabled and is_pdf:
-                                digitise_job = await _submit_sarvam_digitise(
-                                    settings,
-                                    document,
-                                    chunk.path,
-                                )
-                                digitise_job_id = digitise_job.get("job_id")
-                                if digitise_job_id:
-                                    digitise_results.append(
-                                        (
-                                            await _poll_sarvam_digitise(
-                                                settings,
-                                                digitise_job_id,
-                                            ),
-                                            chunk.start_page - 1,
-                                        )
-                                    )
-
-                        merged, annotations, source_pages = _merge_chunk_results(chunk_results)
-                        merged = adapt_up_document(merged)
-                        normalized = normalize_document(merged)
-                    else:
-                        merged = adapt_up_document(_fixture_for(document["filename"]))
-                        annotations = {}
-                        normalized = normalize_document(merged)
-                        source_pages = {
-                            "owner_names": 1,
-                            "survey_number": 1,
-                            "plot_number": 1,
-                            "land_extent": 1,
-                        }
-
+                    merged = adapt_up_document(merged)
+                    normalized = normalize_document(merged)
                     source_anchors = {}
                     local_page_count = None
                     if is_pdf:
