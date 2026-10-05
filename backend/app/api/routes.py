@@ -78,11 +78,25 @@ async def config() -> dict:
                 "note": "Sarvam 105B + Document AI",
             },
             {
+                "id": "nvidia",
+                "label": "NVIDIA NIM",
+                "model": settings.nvidia_model,
+                "configured": bool(settings.nvidia_api_key),
+                "note": "OpenAI-compatible NVIDIA cloud reasoning",
+            },
+            {
+                "id": "ollama",
+                "label": "Ollama Local",
+                "model": settings.ollama_model,
+                "configured": True,
+                "note": "Local model; no API key required",
+            },
+            {
                 "id": "openmodel",
-                "label": "OpenModel",
+                "label": "OpenModel (legacy)",
                 "model": settings.openmodel_model or "Configure OPENMODEL_MODEL",
                 "configured": bool(settings.openmodel_api_key and settings.openmodel_model),
-                "note": "OpenModel proxy; model selected from env",
+                "note": "Legacy provider kept for compatibility",
             },
             {
                 "id": "mock",
@@ -185,7 +199,7 @@ async def analyze(
         raise HTTPException(status_code=400, detail="Upload at least one document first")
 
     provider = reasoning_provider or settings.ai_provider
-    if provider not in {"mock", "sarvam", "openmodel"}:
+    if provider not in {"mock", "sarvam", "nvidia", "ollama", "local", "openmodel"}:
         raise HTTPException(status_code=400, detail="Unsupported reasoning provider")
 
     background_tasks.add_task(analyze_case, case_id, settings, provider)
@@ -393,7 +407,6 @@ async def upload_for_extraction(
         "language": language,
         "output_format": "json",
         "classification": "true",
-        "auto_orient": "true",
         "model": "sarvam-vision-v1",
     }
     files = [
@@ -416,7 +429,11 @@ async def upload_for_extraction(
         )
 
     if response.status_code >= 400:
-        return JSONResponse(status_code=response.status_code, content=response.json())
+        try:
+            error_payload = response.json()
+        except ValueError:
+            error_payload = {"error": response.text[:2000]}
+        return JSONResponse(status_code=response.status_code, content=error_payload)
 
     return response.json()
 
@@ -435,9 +452,13 @@ async def extraction_status(job_id: str):
             headers=headers,
         )
         if status_response.status_code >= 400:
+            try:
+                error_payload = status_response.json()
+            except ValueError:
+                error_payload = {"error": status_response.text[:2000]}
             return JSONResponse(
                 status_code=status_response.status_code,
-                content=status_response.json(),
+                content=error_payload,
             )
 
         status = status_response.json()
