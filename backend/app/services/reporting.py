@@ -86,9 +86,9 @@ def build_pdf_report(case: dict[str, Any], dashboard: dict[str, Any]) -> bytes:
 
     meta = [
         ["Case", str(case.get("name") or case.get("id") or "Untitled")],
-        ["Case ID", str(case.get("id") or "—")],
-        ["Consistency score", f"{dashboard.get('score', '—')}/100"],
-        ["Status", str(dashboard.get("status", "—"))],
+        ["Case ID", str(case.get("id") or "-")],
+        ["Consistency score", f"{dashboard.get('score', '-')}/100"],
+        ["Status", str(dashboard.get("status", "-"))],
         ["Documents reviewed", str(dashboard.get("documents", 0))],
         ["Reasoning provider", str(dashboard.get("reasoning_provider", "mock"))],
     ]
@@ -143,13 +143,13 @@ def build_pdf_report(case: dict[str, Any], dashboard: dict[str, Any]) -> bytes:
         ]))
         ev_rows = [["Document", "Page", "Field", "Value"]]
         for evidence in finding.get("evidence", []):
-            value = evidence.get("value", "—")
+            value = evidence.get("value", "-")
             if isinstance(value, (dict, list)):
                 value = str(value)
             ev_rows.append([
-                str(evidence.get("document", "—")),
-                str(evidence.get("page", "—")),
-                str(evidence.get("field", "—")).replace("_", " "),
+                str(evidence.get("document", "-")),
+                str(evidence.get("page", "-")),
+                str(evidence.get("field", "-")).replace("_", " "),
                 str(value),
             ])
         if len(ev_rows) > 1:
@@ -182,7 +182,7 @@ def build_pdf_report(case: dict[str, Any], dashboard: dict[str, Any]) -> bytes:
     ]
     coverage_rows = [["Record type", "Status"]]
     for item in dashboard.get("coverage", []):
-        coverage_rows.append([str(item.get("name", "—")), str(item.get("status", "—"))])
+        coverage_rows.append([str(item.get("name", "-")), str(item.get("status", "-"))])
     coverage_table = Table(coverage_rows, colWidths=[120 * mm, 48 * mm], repeatRows=1)
     coverage_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef3ef")),
