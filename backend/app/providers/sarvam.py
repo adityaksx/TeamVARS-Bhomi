@@ -18,14 +18,14 @@ class SarvamProvider(AIProvider):
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "temperature": 0.1,
-            "max_tokens": 900,
+            "temperature": 0.2,
+            "max_tokens": 1800,
         }
         headers = {
             "api-subscription-key": self.api_key,
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=90) as client:
             response = await client.post(
                 f"{self.base_url}/v1/chat/completions",
                 json=payload,
