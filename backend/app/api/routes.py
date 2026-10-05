@@ -40,11 +40,13 @@ class ExplainRequest(BaseModel):
     provider: str | None = None
 
 
-def request_settings(sarvam_api_key=None, gemini_api_key=None, grok_api_key=None):
+def request_settings(sarvam_api_key=None, gemini_api_key=None, grok_api_key=None, ollama_base_url=None, ollama_model=None):
     return settings.model_copy(update={
         "sarvam_api_key": sarvam_api_key or settings.sarvam_api_key,
         "gemini_api_key": gemini_api_key or settings.gemini_api_key,
         "grok_api_key": grok_api_key or settings.grok_api_key,
+        "ollama_base_url": ollama_base_url or settings.ollama_base_url,
+        "ollama_model": ollama_model or settings.ollama_model,
     })
 
 
@@ -164,6 +166,8 @@ async def analyze(
     x_sarvam_api_key: str | None = Header(default=None, alias="X-Sarvam-Api-Key"),
     x_gemini_api_key: str | None = Header(default=None, alias="X-Gemini-Api-Key"),
     x_grok_api_key: str | None = Header(default=None, alias="X-Grok-Api-Key"),
+    x_ollama_base_url: str | None = Header(default=None, alias="X-Ollama-Base-Url"),
+    x_ollama_model: str | None = Header(default=None, alias="X-Ollama-Model"),
 ) -> dict:
     case = case_store.get_case(case_id)
     if not case:
@@ -175,7 +179,7 @@ async def analyze(
     if provider not in {"auto", "mock", "sarvam", "gemini", "grok", "ollama", "local"}:
         raise HTTPException(status_code=400, detail="Unsupported reasoning provider")
 
-    background_tasks.add_task(analyze_case, case_id, request_settings(x_sarvam_api_key, x_gemini_api_key, x_grok_api_key), provider)
+    background_tasks.add_task(analyze_case, case_id, request_settings(x_sarvam_api_key, x_gemini_api_key, x_grok_api_key, x_ollama_base_url, x_ollama_model), provider)
     case_store.update_case(case_id, status="queued")
     return {"case_id": case_id, "status": "queued", "reasoning_provider": provider}
 
