@@ -12,6 +12,14 @@ from .sarvam import SarvamProvider
 def get_provider(settings: Settings, override: str | None = None) -> AIProvider:
     provider = (override or settings.ai_provider).lower()
 
+    if provider in {"auto", "fallback"}:
+        if settings.sarvam_api_key:
+            provider = "sarvam"
+        elif settings.nvidia_api_key:
+            provider = "nvidia"
+        else:
+            provider = "ollama"
+
     if provider == "mock":
         return MockProvider()
 
