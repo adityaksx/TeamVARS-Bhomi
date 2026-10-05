@@ -1,11 +1,13 @@
 import httpx
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.providers.factory import get_provider
+from app.services import case_store
+from app.services.pipeline import analyze_case, build_dashboard
 from app.services.reconciliation import build_demo_dashboard
 
 router = APIRouter(prefix="/api")
@@ -14,6 +16,15 @@ settings = get_settings()
 
 class ChatRequest(BaseModel):
     message: str
+    provider: str | None = None
+
+
+class CaseCreateRequest(BaseModel):
+    name: str = "Untitled property review"
+
+
+class ExplainRequest(BaseModel):
+    finding: dict
     provider: str | None = None
 
 
@@ -55,6 +66,114 @@ async def config() -> dict:
 @router.get("/demo/case")
 async def demo_case() -> dict:
     return build_demo_dashboard()
+
+
+@router.get("/cases")
+async def cases() -> list[dict]:
+    return case_store.list_cases()
+
+
+@router.post("/cases")
+async def create_case(payload: CaseCreateRequest) -> dict:
+    return case_store.create_case(payload.name)
+
+
+@router.get("/cases/{case_id}")
+async def get_case(case_id: str) -> dict:
+    case = case_store.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    return case
+
+
+@router.post("/cases/{case_id}/documents")
+async def upload_case_documents(
+    case_id: str,
+    files: list[UploadFile] = File(...),
+) -> dict:
+    case = case_store.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    allowed = {"application/pdf", "image/png", "image/jpeg", "image/jpg"}
+    uploaded = []
+    for file in files:
+        if file.content_type not in allowed:
+            raise HTTPException(
+                status_code=415,
+                detail=f"Unsupported file type for {file.filename}. Use PDF, PNG or JPEG.",
+            )
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail=f"{file.filename} is empty")
+        uploaded.append(
+            case_store.add_document(
+                case_id,
+                file.filename or "document",
+                file.content_type or "application/octet-stream",
+                content,
+            )
+        )
+
+    case_store.update_case(case_id, status="ready")
+    return {"case_id": case_id, "documents": uploaded}
+
+
+@router.post("/cases/{case_id}/analyze")
+async def analyze(
+    case_id: str,
+    background_tasks: BackgroundTasks,
+    reasoning_provider: str | None = None,
+) -> dict:
+    case = case_store.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    if not case.get("documents"):
+        raise HTTPException(status_code=400, detail="Upload at least one document first")
+
+    provider = reasoning_provider or settings.ai_provider
+    if provider not in {"mock", "sarvam", "openmodel"}:
+        raise HTTPException(status_code=400, detail="Unsupported reasoning provider")
+
+    background_tasks.add_task(analyze_case, case_id, settings, provider)
+    case_store.update_case(case_id, status="queued")
+    return {"case_id": case_id, "status": "queued", "reasoning_provider": provider}
+
+
+@router.get("/cases/{case_id}/dashboard")
+async def case_dashboard(case_id: str) -> dict:
+    case = case_store.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    if case.get("analysis"):
+        return case["analysis"]
+
+    return build_dashboard(case, settings.ai_provider)
+
+
+@router.post("/cases/{case_id}/explain")
+async def explain_case(case_id: str, payload: ExplainRequest) -> dict:
+    case = case_store.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    provider = get_provider(settings, payload.provider)
+    context = payload.finding
+    result = await provider.chat(
+        system=(
+            "You are BhoomiLens. Explain a land-record inconsistency using only the supplied "
+            "evidence. Do not claim legal title, fraud, or litigation status. Distinguish a "
+            "contradiction from an ambiguity and end with a verification action."
+        ),
+        user=(
+            "Case evidence:\n"
+            f"{context}\n\n"
+            "Explain this finding in 3 concise parts: what the records say, why it matters, "
+            "and what should be verified next."
+        ),
+    )
+    return {"provider": result.provider, "model": result.model, "answer": result.text}
 
 
 @router.post("/chat")
