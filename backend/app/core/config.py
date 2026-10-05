@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     sarvam_api_key: str | None = None
     sarvam_base_url: str = "https://api.sarvam.ai"
     sarvam_model: str = "sarvam-105b"
+    sarvam_digitise_enabled: bool = False
+    sarvam_document_language: str = "en-IN"
 
     openmodel_api_key: str | None = None
     openmodel_base_url: str = "https://api.openmodel.ai"
