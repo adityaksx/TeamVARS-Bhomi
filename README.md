@@ -1,8 +1,8 @@
 # BhoomiLens
 
-AI-assisted land-record reconciliation for PS41.
+AI-assisted **Uttar Pradesh land-record reconciliation** for PS41.
 
-BhoomiLens turns RTC, mutation, sale deed, EC and supporting property records into structured evidence, reconciles them across documents, flags contradictions, and explains findings without pretending to establish legal title.
+BhoomiLens turns **Khatauni, Gata/Khasra, Mutation/Namantaran, Sale Deed, EC/litigation and supporting property records** into structured evidence, reconciles them across documents, flags contradictions, and explains findings without pretending to establish legal title.
 
 ## Current implementation
 
@@ -10,7 +10,7 @@ BhoomiLens turns RTC, mutation, sale deed, EC and supporting property records in
 Browser
   |
   v
-Next.js light/editorial console
+Next.js light/editorial console — UP-first
   |
   v
 FastAPI
@@ -48,9 +48,9 @@ Sarvam currently gives new users ₹100 of signup credits across its APIs. OpenM
 4. Submit each PDF to Sarvam Document AI when a Sarvam key is configured.
 5. Split PDFs into <=10-page chunks before extraction.
 6. Merge structured extraction results and preserve source-page offsets.
-7. Normalize owner names, survey identifiers, locations, dates and land extent.
+7. Map UP terminology into the canonical schema and normalize owner names, Gata/Khasra identifiers, locations, dates and land extent.
 8. Render uploaded PDF pages and deterministically anchor extracted evidence to matching text regions when text is available.
-9. Reconcile owners, surveys, extents and mutation coverage with deterministic rules.
+9. Reconcile owners, Gata/Khasra identifiers, extents and mutation coverage with deterministic rules.
 10. Compute a Record Consistency Score.
 11. Ask Sarvam/OpenModel to explain a finding using the stored evidence.
 
@@ -90,7 +90,7 @@ AI_PROVIDER=mock
 SARVAM_API_KEY=
 SARVAM_MODEL=sarvam-105b
 SARVAM_DIGITISE_ENABLED=false
-SARVAM_DOCUMENT_LANGUAGE=en-IN
+SARVAM_DOCUMENT_LANGUAGE=hi-IN
 
 OPENMODEL_API_KEY=
 OPENMODEL_MODEL=
@@ -130,7 +130,9 @@ Digitise uses the current `/doc-ai/v1/job/digitise` endpoint and JSON page block
 Backend tests cover:
 
 - name normalization
-- survey mismatch detection
+- UP Gata/Khasra normalization
+- UP document-type mapping
+- survey/Gata mismatch detection
 - extent mismatch detection
 - mutation-gap detection
 - evidence page propagation
