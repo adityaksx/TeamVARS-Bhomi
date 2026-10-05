@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     openmodel_model: str | None = None
 
     cors_origins: str = "http://localhost:3000"
+    sarvam_digitise_enabled: bool = False
+    sarvam_document_language: str = "en-IN"
+    case_store_backend: str = "local"
+    database_url: str | None = None
 
     @property
     def origins(self) -> list[str]:
