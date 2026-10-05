@@ -147,7 +147,7 @@ export default function BhoomiConsole() {
   }
 
   function requestHeaders() {
-    return { ...(apiKeys.sarvam ? { "X-Sarvam-Api-Key": apiKeys.sarvam } : {}), ...(apiKeys.gemini ? { "X-Gemini-Api-Key": apiKeys.gemini } : {}), ...(apiKeys.grok ? { "X-Grok-Api-Key": apiKeys.grok } : {}) };
+    return { ...(apiKeys.sarvam ? { "X-Sarvam-Api-Key": apiKeys.sarvam } : {}), ...(apiKeys.gemini ? { "X-Gemini-Api-Key": apiKeys.gemini } : {}), ...(apiKeys.grok ? { "X-Grok-Api-Key": apiKeys.grok } : {}), "X-Ollama-Base-Url": ollamaBaseUrl, "X-Ollama-Model": ollamaModel };
   }
 
   function providerConfigured(id: Provider) {
