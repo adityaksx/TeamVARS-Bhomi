@@ -106,11 +106,20 @@ button:disabled { cursor: not-allowed; }
 .severity-tag { font-size: 9px; text-transform: uppercase; letter-spacing: .1em; padding: 5px 6px; border: 1px solid currentColor; background: transparent; }
 .evidence-summary { margin: 0 20px 18px; color: #686c66; font-size: 12px; line-height: 1.55; }
 .evidence-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 20px; }
-.evidence-card { border: 1px solid var(--line); background: #fffdf8; padding: 13px; }
+.evidence-card { border: 1px solid var(--line); background: #fffdf8; padding: 13px; text-align: left; color: var(--ink); width: 100%; transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
+.evidence-card:hover { border-color: #aab8ae; transform: translateY(-1px); box-shadow: 0 8px 18px rgba(33, 38, 29, 0.06); }
+.evidence-card.selected { border-color: #8faea7; background: #f5faf7; box-shadow: inset 3px 0 0 var(--blue); }
+.evidence-open-label { margin-top: 12px; color: var(--blue); font-size: 9px; text-transform: uppercase; letter-spacing: .1em; font-weight: 750; }
 .evidence-card-top { justify-content: space-between; gap: 7px; color: var(--muted); font-size: 10px; }
 .evidence-card-top span:nth-child(2) { flex: 1; color: #4f534e; font-weight: 650; }
 .evidence-field { margin-top: 18px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
 .evidence-value { margin-top: 5px; font-size: 21px; letter-spacing: -.045em; }
+.source-viewer { margin: 15px 20px 20px; border: 1px solid var(--line-dark); background: #f4f3ed; overflow: hidden; }
+.source-viewer-head { display: flex; justify-content: space-between; gap: 12px; padding: 11px 12px; border-bottom: 1px solid var(--line); background: #fffdf8; }
+.source-viewer-head strong { display: block; margin-top: 4px; font-size: 12px; }
+.source-viewer-head > span { color: var(--muted); font-size: 10px; align-self: end; }
+.source-frame { display: block; width: 100%; height: 430px; border: 0; background: #e9e8e1; }
+.source-viewer-note { padding: 9px 11px; color: var(--muted); font-size: 10px; line-height: 1.45; border-top: 1px solid var(--line); }
 .difference-callout { margin: 13px 20px 12px; padding: 12px; background: #f8f4ed; border: 1px solid #e4ddd0; display: flex; justify-content: space-between; gap: 15px; align-items: baseline; }
 .difference-callout span { color: #858177; font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
 .difference-callout strong { font-size: 12px; text-align: right; }
