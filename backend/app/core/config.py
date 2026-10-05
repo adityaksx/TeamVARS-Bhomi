@@ -23,6 +23,17 @@ class Settings(BaseSettings):
     case_store_backend: str = "local"
     database_url: str | None = None
 
+    document_storage_backend: str = "local"
+    document_storage_bucket: str | None = None
+    document_storage_endpoint_url: str | None = None
+    document_storage_region: str = "auto"
+    document_storage_access_key: str | None = None
+    document_storage_secret_key: str | None = None
+
+    max_upload_mb: int = 25
+    max_case_upload_mb: int = 100
+    max_documents_per_case: int = 20
+
     @property
     def origins(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
