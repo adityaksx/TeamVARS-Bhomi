@@ -167,7 +167,6 @@ async def _submit_sarvam(
         "language": settings.sarvam_document_language,
         "output_format": "json",
         "classification": "true",
-        "auto_orient": "true",
         "model": "sarvam-vision-v1",
     }
     content = path.read_bytes()
@@ -189,7 +188,14 @@ async def _submit_sarvam(
             data=form,
             files=files,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            try:
+                error_payload = response.json()
+            except ValueError:
+                error_payload = {"error": response.text[:2000]}
+            raise RuntimeError(
+                f"Sarvam Document AI extract failed ({response.status_code}): {error_payload}"
+            )
         return response.json()
 
 
@@ -202,7 +208,14 @@ async def _poll_sarvam(settings: Settings, job_id: str) -> dict[str, Any]:
                 f"{base}/doc-ai/v1/job/{job_id}/status",
                 headers=headers,
             )
-            status.raise_for_status()
+            if status.status_code >= 400:
+                try:
+                    error_payload = status.json()
+                except ValueError:
+                    error_payload = {"error": status.text[:2000]}
+                raise RuntimeError(
+                    f"Sarvam Document AI status failed ({status.status_code}): {error_payload}"
+                )
             payload = status.json()
 
             if payload.get("status") in {
