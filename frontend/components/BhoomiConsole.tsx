@@ -130,11 +130,19 @@ export default function BhoomiConsole() {
     Promise.all([
       jsonFetch("/demo/case"),
       jsonFetch("/config"),
-    ]).then(([demo, config]) => {
-      setData(demo);
-      setProviders(config.providers ?? []);
-      setProvider((config.default_provider as Provider) ?? "mock");
-    });
+    ])
+      .then(([demo, config]) => {
+        setData(demo);
+        setProviders(config.providers ?? []);
+        setProvider((config.default_provider as Provider) ?? "mock");
+      })
+      .catch((error) => {
+        setUploadStatus(
+          error instanceof Error
+            ? `Backend unavailable: ${error.message}`
+            : "Backend unavailable."
+        );
+      });
   }, []);
 
   const finding = useMemo(
