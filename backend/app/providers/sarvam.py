@@ -31,7 +31,10 @@ class SarvamProvider(AIProvider):
                 json=payload,
                 headers=headers,
             )
-            response.raise_for_status()
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"Sarvam chat request failed ({response.status_code}): {response.text[:2000]}"
+                )
             data = response.json()
 
         return AIResult(
