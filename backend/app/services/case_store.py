@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.services.storage import delete_document, put_document
+
 
 ROOT = Path(__file__).resolve().parents[2] / "data"
 UPLOADS = ROOT / "uploads"
@@ -240,10 +242,13 @@ def add_document(case_id: str, filename: str, content_type: str, content: bytes)
             raise KeyError(case_id)
         safe_name = Path(filename).name or "document"
         document_id = f"doc_{uuid.uuid4().hex[:10]}"
-        folder = UPLOADS / case_id
-        folder.mkdir(parents=True, exist_ok=True)
-        storage_path = folder / f"{document_id}_{safe_name}"
-        storage_path.write_bytes(content)
+        storage_path = put_document(
+            case_id,
+            document_id,
+            safe_name,
+            content,
+            content_type,
+        )
         document = {
             "id": document_id,
             "filename": safe_name,
@@ -260,28 +265,32 @@ def add_document(case_id: str, filename: str, content_type: str, content: bytes)
             "source_anchors": {},
             "page_count": None,
         }
-        if _use_postgres():
-            import psycopg
-            _ensure_postgres()
-            with psycopg.connect(_settings().database_url) as connection:
-                connection.execute(
-                    """
-                    INSERT INTO documents (
-                        id, case_id, filename, content_type, size, storage_path,
-                        uploaded_at, status, job_id, extracted, normalized,
-                        annotations, source_pages, source_anchors, page_count
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        document["id"], case_id, document["filename"], content_type,
-                        document["size"], document["storage_path"], document["uploaded_at"],
-                        document["status"], None, {}, {}, {}, {}, {}, None,
-                    ),
-                )
-        else:
-            data = _read()
-            data["cases"][case_id]["documents"][document_id] = document
-            _write(data)
+        try:
+            if _use_postgres():
+                import psycopg
+                _ensure_postgres()
+                with psycopg.connect(_settings().database_url) as connection:
+                    connection.execute(
+                        """
+                        INSERT INTO documents (
+                            id, case_id, filename, content_type, size, storage_path,
+                            uploaded_at, status, job_id, extracted, normalized,
+                            annotations, source_pages, source_anchors, page_count
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            document["id"], case_id, document["filename"], content_type,
+                            document["size"], document["storage_path"], document["uploaded_at"],
+                            document["status"], None, {}, {}, {}, {}, {}, None,
+                        ),
+                    )
+            else:
+                data = _read()
+                data["cases"][case_id]["documents"][document_id] = document
+                _write(data)
+        except Exception:
+            delete_document(storage_path)
+            raise
         return document
 
 
