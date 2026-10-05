@@ -189,3 +189,5 @@ button:disabled { cursor: not-allowed; }
   color: #245b55;
   font-weight: 800;
 }
+
+.property-state-note { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
