@@ -12,12 +12,14 @@ import {
 import {
   ArrowUpRight,
   BadgeCheck,
+  CheckCircle2,
   ChevronDown,
   CircleAlert,
   FileCheck2,
   FileText,
   Languages,
   Landmark,
+  LoaderCircle,
   MessageCircle,
   ScanSearch,
   ShieldCheck,
@@ -38,21 +40,25 @@ type ProviderConfig = {
 };
 
 type Evidence = {
+  document_id?: string;
   document: string;
   page: number;
   field: string;
-  value: string;
+  value: unknown;
 };
 
 type Finding = {
   id: string;
+  kind: string;
   severity: "high" | "medium" | "low";
   title: string;
   summary: string;
+  score_impact: number;
   evidence: Evidence[];
 };
 
 type Dashboard = {
+  case_id?: string;
   documents: number;
   fields_extracted: number;
   entities_normalized: number;
@@ -68,6 +74,8 @@ type Dashboard = {
   findings: Finding[];
   coverage: { name: string; status: string }[];
   timeline: { date: string; label: string; type: string }[];
+  extraction_status?: string;
+  reasoning_provider?: Provider;
 };
 
 const severityMeta = {
@@ -76,6 +84,15 @@ const severityMeta = {
   low: { label: "Low", className: "severity-low" },
 };
 
+async function jsonFetch(path: string, init?: RequestInit) {
+  const response = await fetch(`${API_BASE}${path}`, init);
+  const body = await response.json();
+  if (!response.ok) {
+    throw new Error(body.detail || body.message || "Request failed");
+  }
+  return body;
+}
+
 export default function BhoomiConsole() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [provider, setProvider] = useState<Provider>("mock");
@@ -83,19 +100,20 @@ export default function BhoomiConsole() {
   const [activeFinding, setActiveFinding] = useState("F-001");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
+  const [explanation, setExplanation] = useState("");
   const [busy, setBusy] = useState(false);
+  const [explaining, setExplaining] = useState(false);
   const [language, setLanguage] = useState("English");
   const [uploadStatus, setUploadStatus] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [caseId, setCaseId] = useState("");
+  const [analysisRunning, setAnalysisRunning] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API_BASE}/demo/case`, { cache: "no-store" }).then((r) =>
-        r.json()
-      ),
-      fetch(`${API_BASE}/config`, { cache: "no-store" }).then((r) =>
-        r.json()
-      ),
+      jsonFetch("/demo/case"),
+      jsonFetch("/config"),
     ]).then(([demo, config]) => {
       setData(demo);
       setProviders(config.providers ?? []);
@@ -110,78 +128,90 @@ export default function BhoomiConsole() {
     [activeFinding, data]
   );
 
-  async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setUploadStatus(`Preparing ${file.name}…`);
-
-    const form = new FormData();
-    form.append("file", file);
-    form.append(
-      "language",
-      language === "English" ? "en-IN" : language === "हिन्दी" ? "hi-IN" : "kn-IN"
+  function handleFileSelect(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    setSelectedFiles(files);
+    setUploadStatus(
+      files.length
+        ? `${files.length} document${files.length > 1 ? "s" : ""} ready for analysis.`
+        : ""
     );
-    form.append(
-      "schema",
-      JSON.stringify({
-        type: "object",
-        properties: {
-          document_type: {
-            type: "string",
-            description:
-              "Document type such as RTC, mutation extract, sale deed, or encumbrance certificate",
-          },
-          owner_names: {
-            type: "array",
-            items: { type: "string" },
-            description: "All owner or rights-holder names in the document",
-          },
-          survey_number: {
-            type: "string",
-            description: "Survey number exactly as written",
-          },
-          land_extent: {
-            type: "string",
-            description: "Recorded land extent with unit",
-          },
-          village: {
-            type: "string",
-            description: "Village name",
-          },
-          taluk: {
-            type: "string",
-            description: "Taluk name",
-          },
-          district: {
-            type: "string",
-            description: "District name",
-          },
-        },
-      })
-    );
+  }
+
+  async function startAnalysis() {
+    if (!selectedFiles.length) {
+      uploadInputRef.current?.click();
+      return;
+    }
+
+    setAnalysisRunning(true);
+    setExplanation("");
+    setAnswer("");
 
     try {
-      const response = await fetch(`${API_BASE}/documents/extract`, {
+      let activeCaseId = caseId;
+
+      if (!activeCaseId) {
+        const created = await jsonFetch("/cases", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: `Property review — ${new Date().toLocaleDateString("en-IN")}`,
+          }),
+        });
+        activeCaseId = created.id;
+        setCaseId(activeCaseId);
+      }
+
+      const form = new FormData();
+      selectedFiles.forEach((file) => form.append("files", file));
+
+      setUploadStatus("Uploading document bundle…");
+      await jsonFetch(`/cases/${activeCaseId}/documents`, {
         method: "POST",
         body: form,
       });
-      const body = await response.json();
 
-      if (!response.ok) {
-        throw new Error(body.detail || body.message || "Extraction request failed");
-      }
-
-      setUploadStatus(
-        body.job_id
-          ? `Sarvam job ${body.job_id.slice(0, 8)}… queued`
-          : body.message || "Document accepted for analysis."
+      setUploadStatus("Reconciliation queued…");
+      await jsonFetch(
+        `/cases/${activeCaseId}/analyze?reasoning_provider=${provider}`,
+        { method: "POST" }
       );
+
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const caseState = await jsonFetch(`/cases/${activeCaseId}`);
+
+        if (caseState.status === "completed") {
+          const dashboard = await jsonFetch(
+            `/cases/${activeCaseId}/dashboard`
+          );
+          setData(dashboard);
+          setActiveFinding(dashboard.findings?.[0]?.id ?? "");
+          setUploadStatus(
+            `Analysis complete · ${dashboard.documents} documents reconciled.`
+          );
+          break;
+        }
+
+        if (caseState.status === "failed") {
+          throw new Error(
+            caseState.analysis?.error ?? "Document analysis failed"
+          );
+        }
+
+        setUploadStatus(
+          caseState.status === "processing"
+            ? "Reading and reconciling documents…"
+            : "Analysis queued…"
+        );
+      }
     } catch (error) {
       setUploadStatus(
-        error instanceof Error ? error.message : "Upload failed"
+        error instanceof Error ? error.message : "Analysis failed"
       );
     } finally {
+      setAnalysisRunning(false);
       if (uploadInputRef.current) {
         uploadInputRef.current.value = "";
       }
@@ -196,16 +226,21 @@ export default function BhoomiConsole() {
     setAnswer("");
 
     try {
-      const response = await fetch(`${API_BASE}/chat`, {
+      const context = {
+        property: data?.property,
+        findings: data?.findings,
+        coverage: data?.coverage,
+        timeline: data?.timeline,
+      };
+
+      const body = await jsonFetch("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: question, provider }),
+        body: JSON.stringify({
+          message: `${question}\n\nCASE EVIDENCE:\n${JSON.stringify(context)}`,
+          provider,
+        }),
       });
-      const body = await response.json();
-
-      if (!response.ok) {
-        throw new Error(body.detail || body.message || "AI request failed");
-      }
 
       setAnswer(body.answer);
     } catch (error) {
@@ -215,9 +250,39 @@ export default function BhoomiConsole() {
     }
   }
 
+  async function explainFinding() {
+    if (!finding || !caseId) {
+      setExplanation(
+        "Run a document analysis first. The explanation layer will then use the selected provider against the stored evidence."
+      );
+      return;
+    }
+
+    setExplaining(true);
+    setExplanation("");
+
+    try {
+      const body = await jsonFetch(`/cases/${caseId}/explain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, finding }),
+      });
+      setExplanation(body.answer);
+    } catch (error) {
+      setExplanation(
+        error instanceof Error ? error.message : "Could not explain this finding."
+      );
+    } finally {
+      setExplaining(false);
+    }
+  }
+
   if (!data) {
     return <main className="page-shell loading-shell">Loading case workspace…</main>;
   }
+
+  const extractedReady =
+    data.extraction_status === "completed" || Boolean(caseId);
 
   return (
     <main className="page-shell">
@@ -266,8 +331,9 @@ export default function BhoomiConsole() {
             <em>agree with each other.</em>
           </h1>
           <p className="hero-text">
-            BhoomiLens turns messy RTC, mutation, deed and certificate bundles
-            into one evidence trail — readable before you trust it.
+            Upload the records you actually have. BhoomiLens extracts the
+            facts, normalizes the identities and shows exactly where the story
+            diverges.
           </p>
 
           <div className="hero-actions">
@@ -275,20 +341,44 @@ export default function BhoomiConsole() {
               className="primary-button"
               type="button"
               onClick={() => uploadInputRef.current?.click()}
+              disabled={analysisRunning}
             >
-              <UploadCloud size={17} /> Upload documents
+              <UploadCloud size={17} /> Choose documents
             </button>
             <input
               ref={uploadInputRef}
               type="file"
               accept=".pdf,.png,.jpg,.jpeg"
               hidden
-              onChange={handleUpload}
+              multiple
+              onChange={handleFileSelect}
             />
-            <button className="ghost-button" type="button">
-              <ScanSearch size={17} /> How reconciliation works
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={startAnalysis}
+              disabled={analysisRunning}
+            >
+              {analysisRunning ? (
+                <LoaderCircle className="spin" size={17} />
+              ) : (
+                <ScanSearch size={17} />
+              )}
+              {analysisRunning ? "Analyzing bundle…" : "Analyze bundle"}
             </button>
           </div>
+
+          {selectedFiles.length > 0 && (
+            <div className="selected-files">
+              {selectedFiles.map((file) => (
+                <div className="selected-file" key={`${file.name}-${file.size}`}>
+                  <FileText size={13} />
+                  <span>{file.name}</span>
+                  <CheckCircle2 size={13} />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="score-card">
@@ -308,39 +398,29 @@ export default function BhoomiConsole() {
             <span>{data.findings.length} findings</span>
           </div>
           <div className="score-note">
-            Not a legal title verdict. It is a consistency screen across the
-            uploaded evidence.
+            {extractedReady
+              ? "Computed from structured comparisons across this case."
+              : "Preview dataset. Upload a bundle to run the real reconciliation pipeline."}
           </div>
         </div>
       </section>
 
       {uploadStatus && (
         <div className="upload-status">
-          <UploadCloud size={14} /> {uploadStatus}
+          {analysisRunning ? (
+            <LoaderCircle className="spin" size={14} />
+          ) : (
+            <UploadCloud size={14} />
+          )}
+          {uploadStatus}
         </div>
       )}
 
       <section className="stats-strip">
-        <Metric
-          value={data.documents}
-          label="documents analyzed"
-          icon={<FileText size={16} />}
-        />
-        <Metric
-          value={data.fields_extracted}
-          label="fields extracted"
-          icon={<ScanSearch size={16} />}
-        />
-        <Metric
-          value={data.entities_normalized}
-          label="entities normalized"
-          icon={<ShieldCheck size={16} />}
-        />
-        <Metric
-          value={data.findings.length}
-          label="findings requiring review"
-          icon={<CircleAlert size={16} />}
-        />
+        <Metric value={data.documents} label="documents analyzed" icon={<FileText size={16} />} />
+        <Metric value={data.fields_extracted} label="fields extracted" icon={<ScanSearch size={16} />} />
+        <Metric value={data.entities_normalized} label="entities normalized" icon={<ShieldCheck size={16} />} />
+        <Metric value={data.findings.length} label="findings requiring review" icon={<CircleAlert size={16} />} />
       </section>
 
       <section className="workspace-grid">
@@ -364,9 +444,7 @@ export default function BhoomiConsole() {
               <div className="coverage-row" key={item.name}>
                 <span>{item.status === "present" ? "✓" : "?"}</span>
                 <span>{item.name}</span>
-                <small>
-                  {item.status === "present" ? "provided" : "missing"}
-                </small>
+                <small>{item.status === "present" ? "provided" : "missing"}</small>
               </div>
             ))}
           </div>
@@ -380,50 +458,53 @@ export default function BhoomiConsole() {
           />
 
           <div className="finding-list">
-            {data.findings.map((item) => {
-              const meta = severityMeta[item.severity];
-              const active = item.id === activeFinding;
+            {data.findings.length ? (
+              data.findings.map((item) => {
+                const meta = severityMeta[item.severity];
+                const active = item.id === activeFinding;
 
-              return (
-                <button
-                  className={`finding-item ${active ? "active" : ""}`}
-                  key={item.id}
-                  onClick={() => setActiveFinding(item.id)}
-                >
-                  <div className={`severity-dot ${meta.className}`} />
-                  <div className="finding-item-copy">
-                    <div className="finding-meta">
-                      <span>{meta.label} attention</span>
-                      <span>{item.id}</span>
+                return (
+                  <button
+                    className={`finding-item ${active ? "active" : ""}`}
+                    key={item.id}
+                    onClick={() => setActiveFinding(item.id)}
+                  >
+                    <div className={`severity-dot ${meta.className}`} />
+                    <div className="finding-item-copy">
+                      <div className="finding-meta">
+                        <span>{meta.label} attention</span>
+                        <span>{item.id}</span>
+                      </div>
+                      <strong>{item.title}</strong>
+                      <p>{item.summary}</p>
                     </div>
-                    <strong>{item.title}</strong>
-                    <p>{item.summary}</p>
-                  </div>
-                  <ArrowUpRight size={17} className="row-arrow" />
-                </button>
-              );
-            })}
+                    <ArrowUpRight size={17} className="row-arrow" />
+                  </button>
+                );
+              })
+            ) : (
+              <div className="empty-findings">
+                <CheckCircle2 size={18} />
+                <strong>No contradictions detected yet.</strong>
+                <span>Upload and analyze the document bundle to populate findings.</span>
+              </div>
+            )}
           </div>
 
           <div className="review-note">
             <Sparkles size={15} />
-            Findings are generated from structured comparisons; semantic
-            explanation comes from the selected AI provider.
+            Deterministic rules detect contradictions. AI providers explain
+            ambiguous findings rather than inventing them.
           </div>
         </div>
 
         <div className="evidence-panel panel">
-          <PanelTitle
-            kicker="EVIDENCE"
-            title="Show the source, not just the warning"
-          />
+          <PanelTitle kicker="EVIDENCE" title="Show the source, not just the warning" />
 
-          {finding && (
+          {finding ? (
             <>
               <div className="evidence-title">
-                <span
-                  className={`severity-tag ${severityMeta[finding.severity].className}`}
-                >
+                <span className={`severity-tag ${severityMeta[finding.severity].className}`}>
                   {severityMeta[finding.severity].label}
                 </span>
                 {finding.title}
@@ -445,7 +526,11 @@ export default function BhoomiConsole() {
                     <div className="evidence-field">
                       {evidence.field.replaceAll("_", " ")}
                     </div>
-                    <div className="evidence-value">{evidence.value}</div>
+                    <div className="evidence-value">
+                      {typeof evidence.value === "string"
+                        ? evidence.value
+                        : JSON.stringify(evidence.value)}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -453,10 +538,41 @@ export default function BhoomiConsole() {
               <div className="difference-callout">
                 <span>Difference</span>
                 <strong>
-                  {finding.evidence.map((item) => item.value).join("  ≠  ")}
+                  {finding.evidence.length
+                    ? finding.evidence.map((item) =>
+                        typeof item.value === "string"
+                          ? item.value
+                          : JSON.stringify(item.value)
+                      ).join("  ≠  ")
+                    : "Evidence relationship requires review"}
                 </strong>
               </div>
+
+              <button
+                className="explain-button"
+                type="button"
+                onClick={explainFinding}
+                disabled={explaining}
+              >
+                {explaining ? (
+                  <LoaderCircle className="spin" size={15} />
+                ) : (
+                  <Sparkles size={15} />
+                )}
+                {explaining
+                  ? `Explaining with ${provider}…`
+                  : `Explain this finding with ${provider}`}
+              </button>
+
+              {explanation && (
+                <div className="explanation-box">
+                  <div className="answer-label">{provider.toUpperCase()} EXPLANATION</div>
+                  {explanation}
+                </div>
+              )}
             </>
+          ) : (
+            <div className="empty-evidence">Select a finding to inspect its source evidence.</div>
           )}
         </div>
 
@@ -467,34 +583,33 @@ export default function BhoomiConsole() {
             action={<span className="muted-label">reconstructed</span>}
           />
           <div className="timeline">
-            {data.timeline.map((item) => (
-              <div className="timeline-row" key={`${item.date}-${item.label}`}>
-                <div className="timeline-date">{item.date}</div>
-                <div className="timeline-pin">
-                  <span />
+            {data.timeline.length ? (
+              data.timeline.map((item) => (
+                <div className="timeline-row" key={`${item.date}-${item.label}`}>
+                  <div className="timeline-date">{item.date}</div>
+                  <div className="timeline-pin"><span /></div>
+                  <div className="timeline-copy">
+                    <strong>{item.label}</strong>
+                    <span>{item.type}</span>
+                  </div>
                 </div>
-                <div className="timeline-copy">
-                  <strong>{item.label}</strong>
-                  <span>{item.type}</span>
-                </div>
+              ))
+            ) : (
+              <div className="empty-timeline">
+                Timeline events will appear when date-bearing records are extracted.
               </div>
-            ))}
+            )}
           </div>
         </div>
       </section>
 
       <section className="assistant-panel panel">
         <div className="assistant-left">
-          <div className="assistant-orbit">
-            <MessageCircle size={21} />
-          </div>
+          <div className="assistant-orbit"><MessageCircle size={21} /></div>
           <div>
             <div className="mini-heading">ASK THE RECORDS</div>
             <h2>Evidence-grounded assistant</h2>
-            <p>
-              Ask what changed, why an item was flagged, or which page supports
-              a finding.
-            </p>
+            <p>Ask what changed, why an item was flagged, or which record supports it.</p>
           </div>
         </div>
 
@@ -534,22 +649,13 @@ export default function BhoomiConsole() {
       </section>
 
       <footer className="footer-note">
-        AI-assisted document screening only · Verify material findings against
-        authoritative records and qualified professionals.
+        AI-assisted document screening only · Verify material findings against authoritative records and qualified professionals.
       </footer>
     </main>
   );
 }
 
-function Metric({
-  value,
-  label,
-  icon,
-}: {
-  value: number;
-  label: string;
-  icon: ReactNode;
-}) {
+function Metric({ value, label, icon }: { value: number; label: string; icon: ReactNode }) {
   return (
     <div className="metric">
       <span className="metric-icon">{icon}</span>
