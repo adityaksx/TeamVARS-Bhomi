@@ -7,6 +7,7 @@ import httpx
 
 from app.core.config import Settings
 from app.services import case_store
+from app.services.document_view import build_source_anchors, page_count
 from app.services.normalization import normalize_document
 from app.services.pdf_utils import split_pdf
 from app.services.rules import build_coverage, reconcile_documents
@@ -303,29 +304,47 @@ async def analyze_case(
                     )
 
                 merged, annotations, source_pages = _merge_chunk_results(chunk_results)
+                normalized = normalize_document(merged)
+                source_anchors = {}
+                local_page_count = None
+                if original.suffix.casefold() == ".pdf":
+                    source_anchors = build_source_anchors(original, normalized, source_pages)
+                    local_page_count = page_count(original)
                 case_store.update_document(
                     case_id,
                     document["id"],
                     status="completed",
                     job_id=latest_job_id,
                     extracted=merged,
-                    normalized=normalize_document(merged),
+                    normalized=normalized,
                     annotations=annotations,
                     source_pages=source_pages,
+                    source_anchors=source_anchors,
+                    page_count=local_page_count,
                 )
             else:
                 extracted = _fixture_for(document["filename"])
+                normalized = normalize_document(extracted)
+                source_pages = {
+                    "owner_names": 1,
+                    "survey_number": 1,
+                    "land_extent": 1,
+                }
+                source_anchors = {}
+                local_page_count = None
+                original = Path(document["storage_path"])
+                if original.suffix.casefold() == ".pdf":
+                    source_anchors = build_source_anchors(original, normalized, source_pages)
+                    local_page_count = page_count(original)
                 case_store.update_document(
                     case_id,
                     document["id"],
                     status="completed",
                     extracted=extracted,
-                    normalized=normalize_document(extracted),
-                    source_pages={
-                        "owner_names": 1,
-                        "survey_number": 1,
-                        "land_extent": 1,
-                    },
+                    normalized=normalized,
+                    source_pages=source_pages,
+                    source_anchors=source_anchors,
+                    page_count=local_page_count,
                 )
 
         fresh = case_store.get_case(case_id) or case
