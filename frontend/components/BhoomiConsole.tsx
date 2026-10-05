@@ -24,6 +24,7 @@ import {
   MessageCircle,
   ScanSearch,
   ShieldCheck,
+  Settings,
   Sparkles,
   UploadCloud,
 } from "lucide-react";
@@ -31,7 +32,7 @@ import {
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
 
-type Provider = "auto" | "sarvam" | "nvidia" | "ollama" | "local" | "openmodel" | "mock";
+type Provider = "auto" | "sarvam" | "gemini" | "grok" | "ollama" | "local" | "mock";
 
 type ProviderConfig = {
   id: Provider;
@@ -112,6 +113,10 @@ export default function BhoomiConsole() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [provider, setProvider] = useState<Provider>("auto");
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [apiKeys, setApiKeys] = useState({ sarvam: "", gemini: "", grok: "" });
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState("http://localhost:11434/v1");
+  const [ollamaModel, setOllamaModel] = useState("qwen2.5:7b-instruct");
   const [activeFinding, setActiveFinding] = useState("F-001");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
@@ -126,6 +131,31 @@ export default function BhoomiConsole() {
   const [reporting, setReporting] = useState(false);
   const [activeEvidence, setActiveEvidence] = useState<Evidence | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    try {
+      setApiKeys({ sarvam: localStorage.getItem("bhoomilens_sarvam_key") ?? "", gemini: localStorage.getItem("bhoomilens_gemini_key") ?? "", grok: localStorage.getItem("bhoomilens_grok_key") ?? "" });
+      setOllamaBaseUrl(localStorage.getItem("bhoomilens_ollama_url") ?? "http://localhost:11434/v1");
+      setOllamaModel(localStorage.getItem("bhoomilens_ollama_model") ?? "qwen2.5:7b-instruct");
+    } catch {}
+  }, []);
+
+  function saveSettings() {
+    localStorage.setItem("bhoomilens_sarvam_key", apiKeys.sarvam); localStorage.setItem("bhoomilens_gemini_key", apiKeys.gemini); localStorage.setItem("bhoomilens_grok_key", apiKeys.grok);
+    localStorage.setItem("bhoomilens_ollama_url", ollamaBaseUrl); localStorage.setItem("bhoomilens_ollama_model", ollamaModel);
+    setSettingsOpen(false); setUploadStatus("AI provider settings saved locally in this browser.");
+  }
+
+  function requestHeaders() {
+    return { ...(apiKeys.sarvam ? { "X-Sarvam-Api-Key": apiKeys.sarvam } : {}), ...(apiKeys.gemini ? { "X-Gemini-Api-Key": apiKeys.gemini } : {}), ...(apiKeys.grok ? { "X-Grok-Api-Key": apiKeys.grok } : {}) };
+  }
+
+  function providerConfigured(id: Provider) {
+    if (id === "sarvam") return Boolean(apiKeys.sarvam) || Boolean(providers.find((item) => item.id === id)?.configured);
+    if (id === "gemini") return Boolean(apiKeys.gemini) || Boolean(providers.find((item) => item.id === id)?.configured);
+    if (id === "grok") return Boolean(apiKeys.grok) || Boolean(providers.find((item) => item.id === id)?.configured);
+    return providers.find((item) => item.id === id)?.configured ?? id === "ollama";
+  }
 
   useEffect(() => {
     Promise.all([
@@ -187,7 +217,7 @@ export default function BhoomiConsole() {
       if (!activeCaseId) {
         const created = await jsonFetch("/cases", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...requestHeaders() },
           body: JSON.stringify({
             name: `Property review — ${new Date().toLocaleDateString("en-IN")}`,
           }),
@@ -203,12 +233,13 @@ export default function BhoomiConsole() {
       await jsonFetch(`/cases/${activeCaseId}/documents`, {
         method: "POST",
         body: form,
+        headers: requestHeaders(),
       });
 
       setUploadStatus("Reconciliation queued…");
       await jsonFetch(
         `/cases/${activeCaseId}/analyze?reasoning_provider=${provider}`,
-        { method: "POST" }
+        { method: "POST", headers: requestHeaders() }
       );
 
       let completed = false;
@@ -305,7 +336,7 @@ export default function BhoomiConsole() {
     try {
       const body = await jsonFetch(`/cases/${caseId}/explain`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...requestHeaders() },
         body: JSON.stringify({ provider, finding }),
       });
       setExplanation(body.answer);
@@ -383,6 +414,9 @@ export default function BhoomiConsole() {
           </div>
           <button className="icon-button" aria-label="Language">
             <Languages size={18} />
+          </button>
+          <button className="icon-button settings-trigger" aria-label="AI settings" title="AI provider settings" onClick={() => setSettingsOpen(true)}>
+            <Settings size={18} />
           </button>
           <div className="language-select">
             <span>{language}</span>
@@ -780,7 +814,7 @@ export default function BhoomiConsole() {
                 key={item.id}
                 className={provider === item.id ? "selected" : ""}
                 onClick={() => setProvider(item.id)}
-                disabled={!item.configured && item.id !== "mock"}
+                disabled={!providerConfigured(item.id as Provider) && item.id !== "mock"}
               >
                 {item.label}
               </button>
