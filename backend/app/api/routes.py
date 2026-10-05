@@ -414,7 +414,6 @@ async def upload_for_extraction(
         "language": language,
         "output_format": "json",
         "classification": "true",
-        "model": "sarvam-vision-v1",
     }
     files = [
         (
