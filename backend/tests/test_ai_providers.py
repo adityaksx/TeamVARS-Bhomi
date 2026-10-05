@@ -11,15 +11,16 @@ class AIProviderTests(unittest.TestCase):
         self.assertEqual(provider.name, "ollama")
         self.assertEqual(provider.model, settings.ollama_model)
 
-    def test_nvidia_provider_requires_key(self):
-        settings = Settings(
-            ai_provider="nvidia",
-            nvidia_api_key="test-key",
-            nvidia_model="openai/gpt-oss-20b",
-        )
+    def test_gemini_provider_requires_key(self):
+        settings = Settings(ai_provider="gemini", gemini_api_key="test-key")
         provider = get_provider(settings)
-        self.assertEqual(provider.name, "nvidia")
-        self.assertEqual(provider.model, "openai/gpt-oss-20b")
+        self.assertEqual(provider.name, "gemini")
+
+    def test_grok_provider_requires_key(self):
+        settings = Settings(ai_provider="grok", grok_api_key="test-key")
+        provider = get_provider(settings)
+        self.assertEqual(provider.name, "grok")
+        self.assertEqual(provider.model, "grok-4.7")
 
     def test_sarvam_provider_requires_key(self):
         settings = Settings(
