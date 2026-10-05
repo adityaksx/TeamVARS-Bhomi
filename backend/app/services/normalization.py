@@ -2,7 +2,7 @@ import re
 from typing import Any
 
 
-HONORIFICS = re.compile(r"\b(shri|smt|mr|mrs|ms|dr)\.?\b", re.I)
+HONORIFICS = re.compile(r"\b(shri|smt|mr|mrs|ms|dr|श्री|श्रीमती|सुश्री)\.?\b", re.I)
 SPACE_RE = re.compile(r"\s+")
 UNIT_TO_ACRES = {
     "acre": 1.0,
