@@ -41,8 +41,8 @@ def normalize_survey(value: Any) -> str:
     if value is None:
         return ""
     text = str(value).strip().casefold()
-    text = text.replace("survey no.", "").replace("survey no", "")
-    text = text.replace("sy.no.", "").replace("sy.no", "")
+    for prefix in ("survey no.", "survey no", "sy.no.", "sy.no", "gata no.", "gata no", "gatta no.", "khasra no.", "khasra no"):
+        text = text.replace(prefix, "")
     text = re.sub(r"\s+", "", text)
     return text.replace("-", "/")
 
@@ -77,14 +77,21 @@ def normalize_document(raw: dict[str, Any]) -> dict[str, Any]:
     if isinstance(owners, str):
         owners = [owners]
 
+    survey_value = raw.get("survey_number") or raw.get("gata_number") or raw.get("khasra_number") or raw.get("plot_number")
+    tehsil = normalize_text(raw.get("tehsil") or raw.get("taluk"))
     return {
         "document_type": display_text(raw.get("document_type") or raw.get("type")),
         "owner_names": [normalize_name(item) for item in owners if normalize_name(item)],
-        "survey_number": normalize_survey(raw.get("survey_number")),
+        "survey_number": normalize_survey(survey_value),
+        "plot_number": normalize_survey(survey_value),
         "land_extent": parse_extent(raw.get("land_extent") or raw.get("extent")),
         "village": normalize_text(raw.get("village")),
-        "taluk": normalize_text(raw.get("taluk")),
+        "tehsil": tehsil,
+        "taluk": tehsil,
         "district": normalize_text(raw.get("district")),
         "document_date": display_text(raw.get("document_date") or raw.get("date")),
         "transaction_date": display_text(raw.get("transaction_date")),
+        "previous_owner_names": [normalize_name(item) for item in (raw.get("previous_owner_names") or []) if normalize_name(item)],
+        "new_owner_names": [normalize_name(item) for item in (raw.get("new_owner_names") or []) if normalize_name(item)],
+        "mutation_number": display_text(raw.get("mutation_number")),
     }
