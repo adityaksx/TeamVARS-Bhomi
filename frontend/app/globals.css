@@ -191,3 +191,17 @@ button:disabled { cursor: not-allowed; }
 }
 
 .property-state-note { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+
+.settings-backdrop { position: fixed; inset: 0; z-index: 100; background: rgba(25,29,24,.34); display: grid; place-items: start end; padding: 76px 24px 24px; backdrop-filter: blur(3px); }
+.settings-modal { width: min(420px, calc(100vw - 30px)); background: #fffdf8; border: 1px solid var(--line-dark); box-shadow: 0 24px 70px rgba(30,34,28,.18); padding: 20px; }
+.settings-head { display: flex; justify-content: space-between; align-items: flex-start; }
+.settings-head h2 { margin: 4px 0 0; font-size: 21px; letter-spacing: -.04em; }
+.settings-note { margin: 13px 0 17px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.settings-field { display: block; margin-top: 11px; }
+.settings-field > span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .11em; font-weight: 700; }
+.settings-field input { width: 100%; height: 39px; border: 1px solid var(--line-dark); background: #fff; padding: 0 10px; outline: none; font-size: 12px; box-sizing: border-box; }
+.settings-field input:focus { border-color: #8daea8; box-shadow: 0 0 0 3px #e6f0ee; }
+.settings-divider { border-top: 1px solid var(--line); margin: 18px 0 14px; }
+.settings-section-title { font-size: 10px; text-transform: uppercase; letter-spacing: .13em; color: var(--blue); font-weight: 800; }
+.settings-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 19px; }
+.settings-actions button { min-height: 38px; }
