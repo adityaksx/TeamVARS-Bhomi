@@ -3,6 +3,8 @@ from fastapi import HTTPException
 from app.core.config import Settings
 from .base import AIProvider
 from .mock import MockProvider
+from .nvidia import NvidiaProvider
+from .ollama import OllamaProvider
 from .openmodel import OpenModelProvider
 from .sarvam import SarvamProvider
 
@@ -20,6 +22,21 @@ def get_provider(settings: Settings, override: str | None = None) -> AIProvider:
             settings.sarvam_api_key,
             settings.sarvam_base_url,
             settings.sarvam_model,
+        )
+
+    if provider == "nvidia":
+        if not settings.nvidia_api_key:
+            raise HTTPException(status_code=503, detail="NVIDIA_API_KEY is not configured")
+        return NvidiaProvider(
+            settings.nvidia_api_key,
+            settings.nvidia_base_url,
+            settings.nvidia_model,
+        )
+
+    if provider in {"ollama", "local"}:
+        return OllamaProvider(
+            settings.ollama_base_url,
+            settings.ollama_model,
         )
 
     if provider == "openmodel":
