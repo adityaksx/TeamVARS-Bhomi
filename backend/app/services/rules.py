@@ -4,7 +4,13 @@ from app.domain.schemas import EntityResolution, Evidence, EvidenceAnchor, Findi
 from app.services.entity_resolution import classify_name_match, similarity
 from app.services.normalization import normalize_survey
 
-EXPECTED_DOCUMENTS = [("RTC", "rtc"), ("Mutation", "mutation"), ("Sale Deed", "sale_deed"), ("Encumbrance Certificate", "encumbrance_certificate")]
+EXPECTED_DOCUMENTS = [
+    ("Khatauni", ("khatauni", "khatoni")),
+    ("Gata / Khasra", ("gata", "khasra")),
+    ("Mutation / Namantaran", ("mutation", "namantaran")),
+    ("Sale Deed", ("sale_deed", "sale deed", "registry", "sale")),
+    ("Encumbrance / Litigation", ("encumbrance", "litigation", "ec")),
+]
 
 def _evidence(document: dict[str, Any], field: str, value: Any) -> Evidence:
     page = int(document.get("source_pages", {}).get(field, 1))
@@ -64,7 +70,7 @@ def reconcile_documents(documents: list[dict[str, Any]]) -> list[Finding]:
                 title="Recorded owner differs",
                 summary="The uploaded records contain owner names that do not resolve to the same entity.",
                 score_impact=25, confidence=0.98,
-                verification_action="Verify the owner identity against the original deed and identity-linked record.",
+                verification_action="Verify the owner/seller identity against the original registered deed and authoritative revenue record.",
                 evidence=evidence, resolutions=resolutions,
             ))
         elif "ambiguous" in states:
@@ -84,7 +90,7 @@ def reconcile_documents(documents: list[dict[str, Any]]) -> list[Finding]:
             title="Survey identifier differs",
             summary="At least two uploaded records identify the parcel differently.",
             score_impact=20, confidence=0.96,
-            verification_action="Verify the survey/subdivision number against the latest RTC and registered deed.",
+            verification_action="Verify the Gata/Khasra and subdivision number against the authoritative revenue/cadastral record and registered deed.",
             evidence=[_evidence(doc, "survey_number", value) for doc, value in surveys],
         ))
 
@@ -112,6 +118,16 @@ def reconcile_documents(documents: list[dict[str, Any]]) -> list[Finding]:
     return findings
 
 def build_coverage(documents: list[dict[str, Any]]) -> list[dict[str, str]]:
-    names = " ".join(f"{d.get('filename', '')} {d.get('normalized', {}).get('document_type', '')}".casefold() for d in documents)
-    normalized_names = names.replace("-", "_").replace(" ", "_")
-    return [{"name": label, "status": "present" if token in normalized_names or label.casefold() in names else "missing"} for label, token in EXPECTED_DOCUMENTS]
+    text = " ".join(
+        f"{d.get('filename', '')} {d.get('normalized', {}).get('document_type', '')}".casefold()
+        for d in documents
+    ).replace("-", "_")
+    return [
+        {
+            "name": label,
+            "status": "present"
+            if any(token.replace(" ", "_") in text or token in text for token in tokens)
+            else "missing",
+        }
+        for label, tokens in EXPECTED_DOCUMENTS
+    ]
