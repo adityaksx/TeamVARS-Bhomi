@@ -13,6 +13,7 @@ from app.providers.factory import get_provider
 from app.services import case_store
 from app.services.document_view import render_page
 from app.services.pipeline import analyze_case, build_dashboard
+from app.services.reporting import build_pdf_report
 from app.services.reconciliation import build_demo_dashboard
 
 router = APIRouter(prefix="/api")
@@ -213,6 +214,20 @@ async def document_content(case_id: str, document_id: str):
         media_type=document.get("content_type") or "application/octet-stream",
         filename=document.get("filename", path.name),
         content_disposition_type="inline",
+    )
+
+
+@router.get("/cases/{case_id}/report/pdf")
+async def case_report_pdf(case_id: str):
+    case = case_store.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    dashboard = case.get("analysis") or build_dashboard(case, settings.ai_provider)
+    payload = build_pdf_report(case, dashboard)
+    return StreamingResponse(
+        io.BytesIO(payload),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="bhoomilens-{case_id}.pdf"'},
     )
 
 
