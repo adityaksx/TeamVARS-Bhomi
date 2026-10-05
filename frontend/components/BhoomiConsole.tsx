@@ -373,13 +373,13 @@ export default function BhoomiConsole() {
           </div>
           <div>
             <div className="brand-name">BhoomiLens</div>
-            <div className="brand-sub">record reconciliation / India</div>
+            <div className="brand-sub">UP land records / India</div>
           </div>
         </div>
 
         <div className="topbar-actions">
           <div className="mode-pill">
-            <span className="live-dot" /> Screening mode
+            <span className="live-dot" /> UP screening mode
           </div>
           <button className="icon-button" aria-label="Language">
             <Languages size={18} />
@@ -394,7 +394,6 @@ export default function BhoomiConsole() {
             >
               <option>English</option>
               <option>हिन्दी</option>
-              <option>ಕನ್ನಡ</option>
             </select>
           </div>
         </div>
@@ -403,7 +402,7 @@ export default function BhoomiConsole() {
       <section className="hero-grid">
         <div className="hero-copy">
           <div className="eyebrow">
-            <span>PS41</span> Land-record risk &amp; reconciliation
+            <span>UP • PS41</span> Land-record risk &amp; reconciliation
           </div>
           <h1>
             Make property records
@@ -412,8 +411,8 @@ export default function BhoomiConsole() {
           </h1>
           <p className="hero-text">
             Upload the records you actually have. BhoomiLens extracts the
-            facts, normalizes the identities and shows exactly where the story
-            diverges.
+            facts, normalizes names and Gata references, then shows exactly where
+            the land-record story diverges.
           </p>
 
           <div className="hero-actions">
@@ -459,6 +458,14 @@ export default function BhoomiConsole() {
             </button>
           </div>
 
+          <div className="up-record-strip">
+            <span className="up-state-badge">UTTAR PRADESH</span>
+            <span>Khatauni</span>
+            <span>Gata / Khasra</span>
+            <span>Mutation / Namantaran</span>
+            <span>Sale Deed</span>
+          </div>
+
           {selectedFiles.length > 0 && (
             <div className="selected-files">
               {selectedFiles.map((file) => (
@@ -474,7 +481,7 @@ export default function BhoomiConsole() {
 
         <div className="score-card">
           <div className="score-topline">
-            <span>Record consistency</span>
+            <span>UP record consistency</span>
             <BadgeCheck size={16} />
           </div>
           <div className="score-value">
@@ -492,7 +499,7 @@ export default function BhoomiConsole() {
           <div className="score-note">
             {extractedReady
               ? "Computed from structured comparisons across this case."
-              : "Preview dataset. Upload a bundle to run the real reconciliation pipeline."}
+              : "UP demo dataset. Upload Khatauni, Gata/Khasra, mutation and deed records to run live reconciliation."}
           </div>
         </div>
       </section>
@@ -519,19 +526,19 @@ export default function BhoomiConsole() {
         <div className="property-panel panel">
           <PanelTitle kicker="PROPERTY" title="Identity snapshot" />
           <div className="property-main">
-            <span className="property-label">Survey identifier</span>
+            <span className="property-label">Gata / Khasra identifier</span>
             <strong>{data.property.survey}</strong>
           </div>
 
           <div className="detail-grid">
-            <Detail label="Recorded owner" value={data.property.owner} />
-            <Detail label="Village" value={data.property.village} />
-            <Detail label="Taluk" value={data.property.taluk} />
-            <Detail label="District" value={data.property.district} />
+            <Detail label="Recorded owner / Khatedar" value={data.property.owner} />
+            <Detail label="Village / Gram" value={data.property.village} />
+            <Detail label="Tehsil" value={data.property.taluk} />
+            <Detail label="District / Janpad" value={data.property.district} />
           </div>
 
           <div className="coverage-block">
-            <div className="mini-heading">DOCUMENT COVERAGE</div>
+            <div className="mini-heading">UP DOCUMENT COVERAGE</div>
             {data.coverage.map((item) => (
               <div className="coverage-row" key={item.name}>
                 <span>{item.status === "present" ? "✓" : "?"}</span>
@@ -585,8 +592,8 @@ export default function BhoomiConsole() {
 
           <div className="review-note">
             <Sparkles size={15} />
-            Deterministic rules detect contradictions. AI providers explain
-            ambiguous findings rather than inventing them.
+            UP-specific reconciliation rules detect contradictions. AI providers explain
+            ambiguous findings rather than inventing facts outside supplied records.
           </div>
         </div>
 
