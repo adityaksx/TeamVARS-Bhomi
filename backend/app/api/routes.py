@@ -199,7 +199,7 @@ async def analyze(
         raise HTTPException(status_code=400, detail="Upload at least one document first")
 
     provider = reasoning_provider or settings.ai_provider
-    if provider not in {"mock", "sarvam", "nvidia", "ollama", "local", "openmodel"}:
+    if provider not in {"auto", "mock", "sarvam", "nvidia", "ollama", "local", "openmodel"}:
         raise HTTPException(status_code=400, detail="Unsupported reasoning provider")
 
     background_tasks.add_task(analyze_case, case_id, settings, provider)
