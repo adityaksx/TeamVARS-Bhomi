@@ -251,6 +251,7 @@ def build_dashboard(case: dict[str, Any], reasoning_provider: str = "mock") -> d
             "owner": owners[0] if owners else "Not established",
         },
         "findings": [item.model_dump() for item in findings],
+        "confidence": round(sum(item.confidence for item in findings) / len(findings), 2) if findings else 1.0,
         "coverage": coverage,
         "timeline": timeline,
         "extraction_status": case.get("status", "draft"),
