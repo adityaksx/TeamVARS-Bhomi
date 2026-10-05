@@ -12,6 +12,7 @@ from app.services.document_view import build_source_anchors, page_count
 from app.services.normalization import normalize_document
 from app.services.pdf_utils import split_pdf
 from app.services.rules import build_coverage, reconcile_documents
+from app.adapters.uttar_pradesh import adapt_up_document
 from app.services.storage import materialize
 
 EXTRACTION_SCHEMA = json.dumps(
@@ -20,26 +21,45 @@ EXTRACTION_SCHEMA = json.dumps(
         "properties": {
             "document_type": {
                 "type": "string",
-                "description": "Land record document type such as RTC, mutation extract, sale deed, or encumbrance certificate",
+                "description": "Uttar Pradesh land-record document type such as Khatauni, Gata/Khasra, Mutation/Namantaran, Sale Deed, or encumbrance/litigation record",
             },
             "owner_names": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "All owner or rights-holder names in the document",
+                "description": "All Khatedar/owner/rights-holder names; preserve original script where available",
+            },
+            "previous_owner_names": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Previous owner names when this is a mutation/ownership transition record",
+            },
+            "new_owner_names": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "New owner names when this is a mutation/ownership transition record",
             },
             "survey_number": {
                 "type": "string",
-                "description": "Survey number exactly as written",
+                "description": "Gata/Khasra/plot identifier exactly as written; preserve subdivision notation",
+            },
+            "gata_number": {
+                "type": "string",
+                "description": "Gata number when explicitly labeled",
+            },
+            "khasra_number": {
+                "type": "string",
+                "description": "Khasra number when explicitly labeled",
             },
             "land_extent": {
                 "type": "string",
-                "description": "Recorded land extent with unit",
+                "description": "Recorded land area/extent with unit, exactly as written",
             },
-            "village": {"type": "string", "description": "Village name"},
-            "taluk": {"type": "string", "description": "Taluk name"},
-            "district": {"type": "string", "description": "District name"},
+            "village": {"type": "string", "description": "Village / Gram name"},
+            "tehsil": {"type": "string", "description": "Tehsil name"},
+            "district": {"type": "string", "description": "District / Janpad name"},
+            "mutation_number": {"type": "string", "description": "Mutation/Namantaran entry or order number if present"},
             "document_date": {"type": "string", "description": "Date on the document"},
-            "transaction_date": {"type": "string", "description": "Transaction date if present"},
+            "transaction_date": {"type": "string", "description": "Transaction/registration date if present"},
         },
     }
 )
@@ -48,36 +68,46 @@ EXTRACTION_SCHEMA = json.dumps(
 def _fixture_for(filename: str) -> dict[str, Any]:
     name = filename.casefold()
     base = {
-        "village": "example village",
-        "taluk": "example taluk",
-        "district": "example district",
+        "document_type": "Khatauni",
+        "village": "sikandra",
+        "tehsil": "agra sadar",
+        "district": "agra",
         "owner_names": ["Ramesh Kumar"],
-        "survey_number": "128/3A",
-        "land_extent": "2.10 acres",
-        "document_date": "2024-08-14",
+        "survey_number": "124",
+        "gata_number": "124",
+        "land_extent": "2.50 acres",
+        "document_date": "2025-08-14",
     }
-    if "sale" in name or "deed" in name:
+    if "sale" in name or "deed" in name or "registry" in name:
         base.update(
             {
                 "document_type": "Sale Deed",
-                "survey_number": "128/3",
-                "land_extent": "1.84 acres",
-                "transaction_date": "2024-08-14",
+                "survey_number": "124/3",
+                "gata_number": "124/3",
+                "land_extent": "2.10 acres",
+                "transaction_date": "2025-08-14",
             }
         )
-    elif "mutation" in name:
+    elif "mutation" in name or "namantaran" in name:
         base.update(
             {
-                "document_type": "Mutation Extract",
-                "transaction_date": "2021-04-02",
+                "document_type": "Mutation / Namantaran",
+                "previous_owner_names": ["Ramesh Kumar"],
+                "new_owner_names": ["Suresh Kumar"],
+                "owner_names": ["Ramesh Kumar", "Suresh Kumar"],
+                "mutation_number": "MUT-2025-0412",
+                "transaction_date": "2025-09-02",
             }
         )
         if "mismatch" in name:
-            base["owner_names"] = ["Rajesh Kumar"]
-    elif "ec" in name or "encumbrance" in name:
-        base.update({"document_type": "Encumbrance Certificate"})
-    elif "rtc" in name or "pahani" in name:
-        base.update({"document_type": "RTC"})
+            base["new_owner_names"] = ["Rajesh Kumar"]
+            base["owner_names"] = ["Ramesh Kumar", "Rajesh Kumar"]
+    elif "gata" in name or "khasra" in name:
+        base.update({"document_type": "Gata / Khasra"})
+    elif "litigation" in name or "encumbrance" in name or "ec" in name:
+        base.update({"document_type": "Encumbrance / Litigation"})
+    elif "khatauni" in name or "khatoni" in name:
+        base.update({"document_type": "Khatauni"})
     else:
         base.update({"document_type": "Other"})
     return base
@@ -134,7 +164,7 @@ async def _submit_sarvam(
     headers = {"api-subscription-key": settings.sarvam_api_key or ""}
     form = {
         "schema": EXTRACTION_SCHEMA,
-        "language": "en-IN",
+        "language": settings.sarvam_document_language,
         "output_format": "json",
         "classification": "true",
         "auto_orient": "true",
@@ -472,14 +502,16 @@ async def analyze_case(
                                     )
 
                         merged, annotations, source_pages = _merge_chunk_results(chunk_results)
+                        merged = adapt_up_document(merged)
                         normalized = normalize_document(merged)
                     else:
-                        merged = _fixture_for(document["filename"])
+                        merged = adapt_up_document(_fixture_for(document["filename"]))
                         annotations = {}
                         normalized = normalize_document(merged)
                         source_pages = {
                             "owner_names": 1,
                             "survey_number": 1,
+                            "plot_number": 1,
                             "land_extent": 1,
                         }
 
