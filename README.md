@@ -99,7 +99,7 @@ API keys stay server-side.
 
 Set `SARVAM_DIGITISE_ENABLED=true` to enable the optional Digitise pass.
 
-Set `CASE_STORE_BACKEND=postgres` and `DATABASE_URL` to use PostgreSQL for case/analysis/document metadata. Uploaded files remain in the local `backend/data/uploads` directory; object storage should replace local file storage for multi-instance production deployments. Digitise uses the current `/doc-ai/v1/job/digitise` endpoint and JSON page blocks with bounding boxes. citeturn868334search0turn164316search2
+Set `CASE_STORE_BACKEND=postgres` and `DATABASE_URL` to use PostgreSQL for case/analysis/document metadata. Uploaded files remain in the local `backend/data/uploads` directory; object storage should replace local file storage for multi-instance production deployments. Digitise uses the current `/doc-ai/v1/job/digitise` endpoint and JSON page blocks with bounding boxes.
 
 ## Testing
 
