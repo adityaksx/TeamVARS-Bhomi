@@ -841,6 +841,25 @@ export default function BhoomiConsole() {
         )}
       </section>
 
+      {settingsOpen && (
+        <div className="settings-backdrop" onClick={() => setSettingsOpen(false)}>
+          <section className="settings-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="settings-head">
+              <div><div className="mini-heading">AI CONNECTIONS</div><h2>Provider settings</h2></div>
+              <button className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="Close settings">×</button>
+            </div>
+            <p className="settings-note">Keys are stored in this browser and sent to the backend only when that provider is used.</p>
+            <ProviderKey label="Sarvam AI API key" value={apiKeys.sarvam} onChange={(value) => setApiKeys((state) => ({ ...state, sarvam: value }))} />
+            <ProviderKey label="Gemini API key" value={apiKeys.gemini} onChange={(value) => setApiKeys((state) => ({ ...state, gemini: value }))} />
+            <ProviderKey label="Grok API key" value={apiKeys.grok} onChange={(value) => setApiKeys((state) => ({ ...state, grok: value }))} />
+            <div className="settings-divider" />
+            <div className="settings-section-title">Ollama Local</div>
+            <label className="settings-field"><span>Base URL</span><input value={ollamaBaseUrl} onChange={(e) => setOllamaBaseUrl(e.target.value)} placeholder="http://localhost:11434/v1" /></label>
+            <label className="settings-field"><span>Model</span><input value={ollamaModel} onChange={(e) => setOllamaModel(e.target.value)} placeholder="qwen2.5:7b-instruct" /></label>
+            <div className="settings-actions"><button className="ghost-button" onClick={() => setSettingsOpen(false)}>Cancel</button><button className="primary-button" onClick={saveSettings}>Save settings</button></div>
+          </section>
+        </div>
+      )}
       <footer className="footer-note">
         AI-assisted document screening only · Verify material findings against authoritative records and qualified professionals.
       </footer>
@@ -885,4 +904,8 @@ function PanelTitle({
       {action}
     </div>
   );
+}
+
+function ProviderKey({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return <label className="settings-field"><span>{label}</span><input type="password" value={value} onChange={(event) => onChange(event.target.value)} placeholder="Paste API key" autoComplete="off" /></label>;
 }
