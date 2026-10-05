@@ -39,12 +39,22 @@ type ProviderConfig = {
   configured: boolean;
 };
 
+type EvidenceAnchor = {
+  page: number;
+  page_width: number;
+  page_height: number;
+  bbox: [number, number, number, number];
+  text: string;
+  method: string;
+};
+
 type Evidence = {
   document_id?: string;
   document: string;
   page: number;
   field: string;
   value: unknown;
+  anchor?: EvidenceAnchor | null;
 };
 
 type Finding = {
@@ -593,19 +603,36 @@ export default function BhoomiConsole() {
                       <div className="mini-heading">SOURCE VIEWER</div>
                       <strong>{activeEvidence.document} · page {activeEvidence.page}</strong>
                     </div>
-                    <span>Field: {activeEvidence.field.replaceAll("_", " ")}</span>
+                    <span>
+                      {activeEvidence.anchor ? "Visual anchor found" : "Source page"}
+                    </span>
                   </div>
-                  <iframe
-                    className="source-frame"
-                    title={`Source document — ${activeEvidence.document}`}
-                    src={`${API_BASE}/cases/${caseId}/documents/${activeEvidence.document_id}/content#page=${activeEvidence.page}`}
-                  />
+                  <div className="source-page">
+                    <img
+                      className="source-page-image"
+                      src={`${API_BASE}/cases/${caseId}/documents/${activeEvidence.document_id}/page/${activeEvidence.page}`}
+                      alt={`${activeEvidence.document} page ${activeEvidence.page}`}
+                    />
+                    {activeEvidence.anchor && (
+                      <div
+                        className="source-highlight"
+                        style={{
+                          left: `${(activeEvidence.anchor.bbox[0] / activeEvidence.anchor.page_width) * 100}%`,
+                          top: `${(activeEvidence.anchor.bbox[1] / activeEvidence.anchor.page_height) * 100}%`,
+                          width: `${((activeEvidence.anchor.bbox[2] - activeEvidence.anchor.bbox[0]) / activeEvidence.anchor.page_width) * 100}%`,
+                          height: `${((activeEvidence.anchor.bbox[3] - activeEvidence.anchor.bbox[1]) / activeEvidence.anchor.page_height) * 100}%`,
+                        }}
+                        title={activeEvidence.anchor.text || activeEvidence.field}
+                      />
+                    )}
+                  </div>
                   <div className="source-viewer-note">
-                    The viewer opens the stored source at the cited page. The highlighted field value above is the extracted evidence; visual highlighting is added when document annotation coordinates are available.
+                    {activeEvidence.anchor
+                      ? "The highlighted region is a deterministic text anchor matched against the stored source page."
+                      : "The source page is available, but no deterministic text anchor was found for this evidence value. Scanned-document visual anchoring can be added through Sarvam Digitise."}
                   </div>
                 </div>
               )}
-
               <div className="difference-callout">
                 <span>Verify next</span>
                 <strong>{finding.verification_action || "Review the original source records."}</strong>
