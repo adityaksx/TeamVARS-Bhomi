@@ -31,7 +31,7 @@ import {
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
 
-type Provider = "sarvam" | "openmodel" | "mock";
+type Provider = "sarvam" | "nvidia" | "ollama" | "local" | "openmodel" | "mock";
 
 type ProviderConfig = {
   id: Provider;
