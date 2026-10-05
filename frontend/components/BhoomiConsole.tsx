@@ -524,10 +524,11 @@ export default function BhoomiConsole() {
 
       <section className="workspace-grid">
         <div className="property-panel panel">
-          <PanelTitle kicker="PROPERTY" title="Identity snapshot" />
+          <PanelTitle kicker="UP PROPERTY" title="Identity snapshot" />
           <div className="property-main">
             <span className="property-label">Gata / Khasra identifier</span>
             <strong>{data.property.survey}</strong>
+            <span className="property-state-note">Uttar Pradesh · Revenue record context</span>
           </div>
 
           <div className="detail-grid">
