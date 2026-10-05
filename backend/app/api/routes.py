@@ -1,8 +1,6 @@
 import httpx
 import io
-from pathlib import Path
-
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
@@ -51,6 +49,14 @@ async def health() -> dict:
 async def config() -> dict:
     return {
         "default_provider": settings.ai_provider,
+        "document_limits": {
+            "max_upload_mb": settings.max_upload_mb,
+            "max_case_upload_mb": settings.max_case_upload_mb,
+            "max_documents_per_case": settings.max_documents_per_case,
+        },
+        "storage": {
+            "backend": settings.document_storage_backend,
+        },
         "providers": [
             {
                 "id": "sarvam",
