@@ -1,0 +1,41 @@
+import httpx
+
+from .base import AIProvider, AIResult
+
+
+class SarvamProvider(AIProvider):
+    name = "sarvam"
+
+    def __init__(self, api_key: str, base_url: str, model: str):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+
+    async def chat(self, system: str, user: str) -> AIResult:
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": 0.1,
+            "max_tokens": 900,
+        }
+        headers = {
+            "api-subscription-key": self.api_key,
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{self.base_url}/v1/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        return AIResult(
+            provider=self.name,
+            model=self.model,
+            text=data["choices"][0]["message"]["content"],
+        )
