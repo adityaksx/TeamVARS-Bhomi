@@ -206,7 +206,7 @@ def _sarvam_value_text(value: Any) -> str:
 def _text_tokens(value: Any) -> list[str]:
     import re
 
-    return [token for token in re.findall(r"[\\w./-]+", _sarvam_value_text(value).casefold()) if token]
+    return [token for token in re.findall(r"[\w./-]+", _sarvam_value_text(value).casefold()) if token]
 
 
 def _block_anchor(block: dict[str, Any], target: Any, page: dict[str, Any], page_offset: int) -> dict[str, Any] | None:
