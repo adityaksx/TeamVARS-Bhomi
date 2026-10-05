@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "BhoomiLens API"
-    ai_provider: str = "mock"
+    ai_provider: str = "auto"
 
     sarvam_api_key: str | None = None
     sarvam_base_url: str = "https://api.sarvam.ai"
