@@ -1,5 +1,6 @@
 import asyncio
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from app.services.document_view import build_source_anchors, page_count
 from app.services.normalization import normalize_document
 from app.services.pdf_utils import split_pdf
 from app.services.rules import build_coverage, reconcile_documents
+from app.services.storage import materialize
 
 EXTRACTION_SCHEMA = json.dumps(
     {
@@ -410,96 +412,117 @@ async def analyze_case(
 
     try:
         for document in documents:
-            if settings.sarvam_api_key:
-                original = Path(document["storage_path"])
-                if original.suffix.casefold() == ".pdf":
-                    chunks = split_pdf(
-                        original,
-                        case_store.UPLOADS / case_id / f"{document['id']}_chunks",
-                    )
-                else:
-                    chunks = [type("Chunk", (), {
-                        "path": original,
-                        "start_page": 1,
-                        "end_page": 1,
-                    })()]
+            with materialize(document["storage_path"]) as original:
+                is_pdf = original.suffix.casefold() == ".pdf"
+                chunk_dir = case_store.UPLOADS / case_id / f"{document['id']}_chunks"
 
-                chunk_results = []
-                digitise_results = []
-                latest_job_id = None
-                for chunk in chunks:
-                    submitted = await _submit_sarvam(settings, document, chunk.path)
-                    latest_job_id = submitted.get("job_id")
-                    result_payload = await _poll_sarvam(settings, latest_job_id)
-                    extracted = _extract_result(result_payload)
-                    chunk_results.append(
-                        (
-                            extracted,
-                            result_payload.get("annotations", {}),
-                            chunk.start_page - 1,
-                        )
-                    )
+                try:
+                    if settings.sarvam_api_key and is_pdf:
+                        chunks = split_pdf(original, chunk_dir)
+                    else:
+                        chunks = [type(
+                            "Chunk",
+                            (),
+                            {
+                                "path": original,
+                                "start_page": 1,
+                                "end_page": 1,
+                            },
+                        )()]
 
-                    if settings.sarvam_digitise_enabled:
-                        digitise_job = await _submit_sarvam_digitise(settings, document, chunk.path)
-                        digitise_job_id = digitise_job.get("job_id")
-                        if digitise_job_id:
-                            digitise_results.append(
+                    chunk_results = []
+                    digitise_results = []
+                    latest_job_id = None
+
+                    if settings.sarvam_api_key:
+                        for chunk in chunks:
+                            submitted = await _submit_sarvam(settings, document, chunk.path)
+                            latest_job_id = submitted.get("job_id")
+                            if not latest_job_id:
+                                raise RuntimeError(
+                                    f"Sarvam extraction did not return a job ID for {document['filename']}."
+                                )
+
+                            result_payload = await _poll_sarvam(settings, latest_job_id)
+                            extracted = _extract_result(result_payload)
+                            chunk_results.append(
                                 (
-                                    await _poll_sarvam_digitise(settings, digitise_job_id),
+                                    extracted,
+                                    result_payload.get("annotations", {}),
                                     chunk.start_page - 1,
                                 )
                             )
 
-                merged, annotations, source_pages = _merge_chunk_results(chunk_results)
-                normalized = normalize_document(merged)
-                source_anchors = {}
-                local_page_count = None
-                if original.suffix.casefold() == ".pdf":
-                    for digitise_payload, page_offset in digitise_results:
-                        for key, anchor in _digitise_anchors(digitise_payload, normalized, page_offset).items():
-                            source_anchors.setdefault(key, anchor)
-                    source_anchors.update({
-                        key: value for key, value in build_source_anchors(original, normalized, source_pages).items()
-                        if key not in source_anchors
-                    })
-                    local_page_count = page_count(original)
-                case_store.update_document(
-                    case_id,
-                    document["id"],
-                    status="completed",
-                    job_id=latest_job_id,
-                    extracted=merged,
-                    normalized=normalized,
-                    annotations=annotations,
-                    source_pages=source_pages,
-                    source_anchors=source_anchors,
-                    page_count=local_page_count,
-                )
-            else:
-                extracted = _fixture_for(document["filename"])
-                normalized = normalize_document(extracted)
-                source_pages = {
-                    "owner_names": 1,
-                    "survey_number": 1,
-                    "land_extent": 1,
-                }
-                source_anchors = {}
-                local_page_count = None
-                original = Path(document["storage_path"])
-                if original.suffix.casefold() == ".pdf":
-                    source_anchors = build_source_anchors(original, normalized, source_pages)
-                    local_page_count = page_count(original)
-                case_store.update_document(
-                    case_id,
-                    document["id"],
-                    status="completed",
-                    extracted=extracted,
-                    normalized=normalized,
-                    source_pages=source_pages,
-                    source_anchors=source_anchors,
-                    page_count=local_page_count,
-                )
+                            if settings.sarvam_digitise_enabled and is_pdf:
+                                digitise_job = await _submit_sarvam_digitise(
+                                    settings,
+                                    document,
+                                    chunk.path,
+                                )
+                                digitise_job_id = digitise_job.get("job_id")
+                                if digitise_job_id:
+                                    digitise_results.append(
+                                        (
+                                            await _poll_sarvam_digitise(
+                                                settings,
+                                                digitise_job_id,
+                                            ),
+                                            chunk.start_page - 1,
+                                        )
+                                    )
+
+                        merged, annotations, source_pages = _merge_chunk_results(chunk_results)
+                        normalized = normalize_document(merged)
+                    else:
+                        merged = _fixture_for(document["filename"])
+                        annotations = {}
+                        normalized = normalize_document(merged)
+                        source_pages = {
+                            "owner_names": 1,
+                            "survey_number": 1,
+                            "land_extent": 1,
+                        }
+
+                    source_anchors = {}
+                    local_page_count = None
+                    if is_pdf:
+                        for digitise_payload, page_offset in digitise_results:
+                            for key, anchor in _digitise_anchors(
+                                digitise_payload,
+                                normalized,
+                                page_offset,
+                            ).items():
+                                source_anchors.setdefault(key, anchor)
+
+                        for key, value in build_source_anchors(
+                            original,
+                            normalized,
+                            source_pages,
+                        ).items():
+                            source_anchors.setdefault(key, value)
+
+                        local_page_count = page_count(original)
+
+                    update_fields = {
+                        "status": "completed",
+                        "extracted": merged,
+                        "normalized": normalized,
+                        "annotations": annotations,
+                        "source_pages": source_pages,
+                        "source_anchors": source_anchors,
+                        "page_count": local_page_count,
+                    }
+                    if latest_job_id:
+                        update_fields["job_id"] = latest_job_id
+
+                    case_store.update_document(
+                        case_id,
+                        document["id"],
+                        **update_fields,
+                    )
+                finally:
+                    if chunk_dir.exists() and chunk_dir != original.parent:
+                        shutil.rmtree(chunk_dir, ignore_errors=True)
 
         fresh = case_store.get_case(case_id) or case
         dashboard = build_dashboard(fresh, reasoning_provider)
