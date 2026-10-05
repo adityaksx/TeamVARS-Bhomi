@@ -57,6 +57,18 @@ async def config() -> dict:
         "storage": {
             "backend": settings.document_storage_backend,
         },
+        "land_records": {
+            "state": settings.land_record_state,
+            "state_name": "Uttar Pradesh",
+            "language": settings.sarvam_document_language,
+            "document_types": [
+                "Khatauni",
+                "Gata / Khasra",
+                "Mutation / Namantaran",
+                "Sale Deed",
+                "Encumbrance / Litigation",
+            ],
+        },
         "providers": [
             {
                 "id": "sarvam",
