@@ -484,7 +484,7 @@ async def analyze_case(
                     source_pages = {}
                     sarvam_error = None
 
-                    if settings.sarvam_api_key:
+                    if settings.sarvam_api_key and extraction_provider in {'auto', 'fallback', 'sarvam'}:
                         try:
                             for chunk in chunks:
                                 submitted = await _submit_sarvam(settings, document, chunk.path)
@@ -508,7 +508,7 @@ async def analyze_case(
                         try:
                             merged, extraction_provider = await extract_with_fallback(
                                 settings, original, EXTRACTION_SCHEMA,
-                                'nvidia' if settings.nvidia_api_key else 'ollama',
+                                extraction_provider if extraction_provider in {'gemini', 'grok', 'ollama', 'local'} else 'auto',
                             )
                         except Exception as fallback_error:
                             if sarvam_error:
