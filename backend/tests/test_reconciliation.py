@@ -1,5 +1,6 @@
 import unittest
 
+from app.services.entity_resolution import classify_name_match
 from app.services.normalization import normalize_document
 from app.services.rules import reconcile_documents
 
@@ -21,6 +22,7 @@ def doc(doc_id: str, name: str, **raw):
         "filename": name,
         "extracted": extracted,
         "normalized": normalized,
+        "source_pages": {"owner_names": 2, "survey_number": 2, "land_extent": 3},
     }
 
 
@@ -34,12 +36,17 @@ class ReconciliationTests(unittest.TestCase):
         self.assertNotIn("owner_mismatch", kinds)
         self.assertNotIn("survey_mismatch", kinds)
 
-    def test_survey_mismatch_is_reported(self):
+    def test_kumar_is_preserved_as_part_of_name(self):
+        normalized = normalize_document({"owner_names": ["Shri Ramesh Kumar"]})
+        self.assertEqual(normalized["owner_names"], ["ramesh kumar"])
+
+    def test_survey_mismatch_is_reported_with_source_page(self):
         findings = reconcile_documents([
             doc("1", "rtc.pdf"),
             doc("2", "sale_deed.pdf", document_type="Sale Deed", survey_number="128/3"),
         ])
-        self.assertIn("survey_mismatch", {item.kind for item in findings})
+        finding = next(item for item in findings if item.kind == "survey_mismatch")
+        self.assertEqual(finding.evidence[0].page, 2)
 
     def test_extent_mismatch_is_reported(self):
         findings = reconcile_documents([
@@ -53,6 +60,9 @@ class ReconciliationTests(unittest.TestCase):
             doc("1", "sale_deed.pdf", document_type="Sale Deed"),
         ])
         self.assertIn("mutation_gap", {item.kind for item in findings})
+
+    def test_similar_names_are_ambiguous_not_automatically_equal(self):
+        self.assertEqual(classify_name_match("ramesh kumar", "ramesh kumar singh"), "ambiguous")
 
 
 if __name__ == "__main__":
