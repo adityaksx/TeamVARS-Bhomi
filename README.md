@@ -104,7 +104,26 @@ API keys stay server-side.
 
 Set `SARVAM_DIGITISE_ENABLED=true` to enable the optional Digitise pass.
 
-Set `CASE_STORE_BACKEND=postgres` and `DATABASE_URL` to use PostgreSQL for case/analysis/document metadata. Uploaded files remain in the local `backend/data/uploads` directory; object storage should replace local file storage for multi-instance production deployments. Digitise uses the current `/doc-ai/v1/job/digitise` endpoint and JSON page blocks with bounding boxes.
+Set `CASE_STORE_BACKEND=postgres` and `DATABASE_URL` to use PostgreSQL for case/analysis/document metadata.
+
+### Durable document storage
+
+Local file storage is the default for development. For multi-instance production deployments, set `DOCUMENT_STORAGE_BACKEND=s3` and configure the S3-compatible bucket credentials below. Cloudflare R2, AWS S3 and other S3-compatible stores are supported through the same adapter.
+
+```env
+DOCUMENT_STORAGE_BACKEND=s3
+DOCUMENT_STORAGE_BUCKET=bhoomilens-documents
+DOCUMENT_STORAGE_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
+DOCUMENT_STORAGE_REGION=auto
+DOCUMENT_STORAGE_ACCESS_KEY=<server-side-key>
+DOCUMENT_STORAGE_SECRET_KEY=<server-side-secret>
+```
+
+The database stores an object reference such as `s3://bucket/cases/<case>/documents/<document>/<filename>`; analysis temporarily materializes remote files only when PDF parsing or source rendering needs a filesystem path.
+
+Uploads are validated by file signature rather than trusting only the browser MIME type. The API also enforces a 25 MB default per-document limit, a 100 MB per-case aggregate limit, and 20 documents per case; these are configurable through the `MAX_*` settings. Filenames are path-normalized before storage.
+
+Digitise uses the current `/doc-ai/v1/job/digitise` endpoint and JSON page blocks with bounding boxes.
 
 ## Testing
 
