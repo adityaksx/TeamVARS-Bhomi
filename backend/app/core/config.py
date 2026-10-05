@@ -13,7 +13,8 @@ class Settings(BaseSettings):
     sarvam_base_url: str = "https://api.sarvam.ai"
     sarvam_model: str = "sarvam-105b"
     sarvam_digitise_enabled: bool = False
-    sarvam_document_language: str = "en-IN"
+    sarvam_document_language: str = "hi-IN"
+    land_record_state: str = "UP"
 
     openmodel_api_key: str | None = None
     openmodel_base_url: str = "https://api.openmodel.ai"
