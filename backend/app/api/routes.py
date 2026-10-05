@@ -2,7 +2,7 @@ import httpx
 import io
 from fastapi.responses import StreamingResponse
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -40,6 +40,14 @@ class ExplainRequest(BaseModel):
     provider: str | None = None
 
 
+def request_settings(sarvam_api_key=None, gemini_api_key=None, grok_api_key=None):
+    return settings.model_copy(update={
+        "sarvam_api_key": sarvam_api_key or settings.sarvam_api_key,
+        "gemini_api_key": gemini_api_key or settings.gemini_api_key,
+        "grok_api_key": grok_api_key or settings.grok_api_key,
+    })
+
+
 @router.get("/health")
 async def health() -> dict:
     return {"ok": True, "service": settings.app_name}
@@ -54,67 +62,22 @@ async def config() -> dict:
             "max_case_upload_mb": settings.max_case_upload_mb,
             "max_documents_per_case": settings.max_documents_per_case,
         },
-        "storage": {
-            "backend": settings.document_storage_backend,
-        },
+        "storage": {"backend": settings.document_storage_backend},
         "land_records": {
             "state": settings.land_record_state,
             "state_name": "Uttar Pradesh",
             "language": settings.sarvam_document_language,
-            "document_types": [
-                "Khatauni",
-                "Gata / Khasra",
-                "Mutation / Namantaran",
-                "Sale Deed",
-                "Encumbrance / Litigation",
-            ],
+            "document_types": ["Khatauni", "Gata / Khasra", "Mutation / Namantaran", "Sale Deed", "Encumbrance / Litigation"],
         },
         "providers": [
-            {
-                "id": "auto",
-                "label": "Auto · Sarvam → NVIDIA → Ollama",
-                "model": "automatic fallback",
-                "configured": True,
-                "note": "Uses Sarvam first, then NVIDIA, then local Ollama",
-            },
-            {
-                "id": "sarvam",
-                "label": "Sarvam AI",
-                "model": settings.sarvam_model,
-                "configured": bool(settings.sarvam_api_key),
-                "note": "Sarvam 105B + Document AI",
-            },
-            {
-                "id": "nvidia",
-                "label": "NVIDIA NIM",
-                "model": settings.nvidia_model,
-                "configured": bool(settings.nvidia_api_key),
-                "note": "OpenAI-compatible NVIDIA cloud reasoning",
-            },
-            {
-                "id": "ollama",
-                "label": "Ollama Local",
-                "model": settings.ollama_model,
-                "configured": True,
-                "note": "Local model; no API key required",
-            },
-            {
-                "id": "openmodel",
-                "label": "OpenModel (legacy)",
-                "model": settings.openmodel_model or "Configure OPENMODEL_MODEL",
-                "configured": bool(settings.openmodel_api_key and settings.openmodel_model),
-                "note": "Legacy provider kept for compatibility",
-            },
-            {
-                "id": "mock",
-                "label": "Local Demo",
-                "model": "deterministic-demo",
-                "configured": True,
-                "note": "Zero-key local testing",
-            },
+            {"id": "auto", "label": "Auto · Sarvam → Gemini → Grok → Ollama", "model": "automatic fallback", "configured": True},
+            {"id": "sarvam", "label": "Sarvam AI", "model": settings.sarvam_model, "configured": bool(settings.sarvam_api_key)},
+            {"id": "gemini", "label": "Gemini", "model": settings.gemini_model, "configured": bool(settings.gemini_api_key)},
+            {"id": "grok", "label": "Grok", "model": settings.grok_model, "configured": bool(settings.grok_api_key)},
+            {"id": "ollama", "label": "Ollama Local", "model": settings.ollama_model, "configured": True},
+            {"id": "mock", "label": "Local Demo", "model": "deterministic-demo", "configured": True},
         ],
     }
-
 
 @router.get("/demo/case")
 async def demo_case() -> dict:
@@ -198,6 +161,9 @@ async def analyze(
     case_id: str,
     background_tasks: BackgroundTasks,
     reasoning_provider: str | None = None,
+    x_sarvam_api_key: str | None = Header(default=None, alias="X-Sarvam-Api-Key"),
+    x_gemini_api_key: str | None = Header(default=None, alias="X-Gemini-Api-Key"),
+    x_grok_api_key: str | None = Header(default=None, alias="X-Grok-Api-Key"),
 ) -> dict:
     case = case_store.get_case(case_id)
     if not case:
@@ -206,10 +172,10 @@ async def analyze(
         raise HTTPException(status_code=400, detail="Upload at least one document first")
 
     provider = reasoning_provider or settings.ai_provider
-    if provider not in {"auto", "mock", "sarvam", "nvidia", "ollama", "local", "openmodel"}:
+    if provider not in {"auto", "mock", "sarvam", "gemini", "grok", "ollama", "local"}:
         raise HTTPException(status_code=400, detail="Unsupported reasoning provider")
 
-    background_tasks.add_task(analyze_case, case_id, settings, provider)
+    background_tasks.add_task(analyze_case, case_id, request_settings(x_sarvam_api_key, x_gemini_api_key, x_grok_api_key), provider)
     case_store.update_case(case_id, status="queued")
     return {"case_id": case_id, "status": "queued", "reasoning_provider": provider}
 
@@ -344,12 +310,12 @@ async def case_report(case_id: str):
 
 
 @router.post("/cases/{case_id}/explain")
-async def explain_case(case_id: str, payload: ExplainRequest) -> dict:
+async def explain_case(case_id: str, payload: ExplainRequest, x_sarvam_api_key: str | None = Header(default=None, alias="X-Sarvam-Api-Key"), x_gemini_api_key: str | None = Header(default=None, alias="X-Gemini-Api-Key"), x_grok_api_key: str | None = Header(default=None, alias="X-Grok-Api-Key")) -> dict:
     case = case_store.get_case(case_id)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
-    provider = get_provider(settings, payload.provider)
+    provider = get_provider(request_settings(x_sarvam_api_key, x_gemini_api_key, x_grok_api_key), payload.provider)
     context = payload.finding
     result = await provider.chat(
         system=(
@@ -368,8 +334,8 @@ async def explain_case(case_id: str, payload: ExplainRequest) -> dict:
 
 
 @router.post("/chat")
-async def chat(payload: ChatRequest) -> dict:
-    provider = get_provider(settings, payload.provider)
+async def chat(payload: ChatRequest, x_sarvam_api_key: str | None = Header(default=None, alias="X-Sarvam-Api-Key"), x_gemini_api_key: str | None = Header(default=None, alias="X-Gemini-Api-Key"), x_grok_api_key: str | None = Header(default=None, alias="X-Grok-Api-Key")) -> dict:
+    provider = get_provider(request_settings(x_sarvam_api_key, x_gemini_api_key, x_grok_api_key), payload.provider)
     result = await provider.chat(
         system=(
             "You are BhoomiLens, an evidence-constrained land-record reconciliation assistant. "
@@ -413,7 +379,6 @@ async def upload_for_extraction(
         "schema": schema,
         "language": language,
         "output_format": "json",
-        "classification": "true",
     }
     files = [
         (
