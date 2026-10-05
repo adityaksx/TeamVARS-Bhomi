@@ -483,6 +483,7 @@ async def analyze_case(
                     merged = None
                     annotations = {}
                     source_pages = {}
+                    sarvam_error = None
 
                     if settings.sarvam_api_key:
                         try:
@@ -500,14 +501,23 @@ async def analyze_case(
                                     if digitise_job_id:
                                         digitise_results.append((await _poll_sarvam_digitise(settings, digitise_job_id), chunk.start_page - 1))
                             merged, annotations, source_pages = _merge_chunk_results(chunk_results)
-                        except Exception:
+                        except Exception as exc:
+                            sarvam_error = str(exc)
                             merged = None
 
                     if not merged:
-                        merged, extraction_provider = await extract_with_fallback(
-                            settings, original, EXTRACTION_SCHEMA,
-                            'nvidia' if settings.nvidia_api_key else 'ollama',
-                        )
+                        try:
+                            merged, extraction_provider = await extract_with_fallback(
+                                settings, original, EXTRACTION_SCHEMA,
+                                'nvidia' if settings.nvidia_api_key else 'ollama',
+                            )
+                        except Exception as fallback_error:
+                            if sarvam_error:
+                                raise RuntimeError(
+                                    f"Sarvam extraction failed: {sarvam_error}; "
+                                    f"AI fallback failed: {fallback_error}"
+                                ) from fallback_error
+                            raise
                         source_pages = {'owner_names': 1, 'survey_number': 1, 'land_extent': 1}
 
                     merged = adapt_up_document(merged)
