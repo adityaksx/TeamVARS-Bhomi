@@ -211,6 +211,7 @@ export default function BhoomiConsole() {
         { method: "POST" }
       );
 
+      let completed = false;
       for (let attempt = 0; attempt < 80; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         const caseState = await jsonFetch(`/cases/${activeCaseId}`);
@@ -224,6 +225,7 @@ export default function BhoomiConsole() {
           setUploadStatus(
             `Analysis complete · ${dashboard.documents} documents reconciled.`
           );
+          completed = true;
           break;
         }
 
@@ -237,6 +239,12 @@ export default function BhoomiConsole() {
           caseState.status === "processing"
             ? "Reading and reconciling documents…"
             : "Analysis queued…"
+        );
+      }
+
+      if (!completed) {
+        throw new Error(
+          "Analysis is taking longer than expected. Check the case status and retry."
         );
       }
     } catch (error) {
