@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from app.core.config import get_settings
 from app.providers.factory import get_provider
 from app.services import case_store
+from app.services.document_view import render_page
 from app.services.pipeline import analyze_case, build_dashboard
 from app.services.reconciliation import build_demo_dashboard
 
@@ -154,6 +155,43 @@ async def case_dashboard(case_id: str) -> dict:
         return case["analysis"]
 
     return build_dashboard(case, settings.ai_provider)
+
+
+@router.get("/cases/{case_id}/documents/{document_id}/page/{page_number}")
+async def document_page(case_id: str, document_id: str, page_number: int):
+    case = case_store.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    document = case.get("documents", {}).get(document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    path = Path(document["storage_path"])
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Document file not found")
+    if page_number < 1:
+        raise HTTPException(status_code=400, detail="Page number must be at least 1")
+
+    content_type = document.get("content_type", "")
+    if content_type == "application/pdf":
+        try:
+            content, width, height = render_page(path, page_number)
+        except ValueError as exc:
+            raise HTTPException(status_code=416, detail=str(exc)) from exc
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type="image/png",
+            headers={"X-Page-Width": str(width), "X-Page-Height": str(height)},
+        )
+
+    if page_number != 1:
+        raise HTTPException(status_code=416, detail="Image documents contain one page")
+    return FileResponse(
+        path,
+        media_type=content_type or "application/octet-stream",
+        filename=document.get("filename", path.name),
+        content_disposition_type="inline",
+    )
 
 
 @router.get("/cases/{case_id}/documents/{document_id}/content")
