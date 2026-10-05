@@ -97,6 +97,8 @@ OPENMODEL_BASE_URL=https://api.openmodel.ai
 
 API keys stay server-side.
 
+Set `SARVAM_DIGITISE_ENABLED=true` to enable the optional Digitise pass. Digitise uses the current `/doc-ai/v1/job/digitise` endpoint and JSON page blocks with bounding boxes. citeturn868334search0turn164316search2
+
 ## Testing
 
 Backend tests cover:
@@ -107,6 +109,8 @@ Backend tests cover:
 - mutation-gap detection
 - evidence page propagation
 - visual PDF text anchors
+- Sarvam Digitise bounding-box anchors
+- structured PDF report generation
 - ambiguous entity matching
 
 CI runs Python compilation/unit tests and Next.js typecheck/build.
