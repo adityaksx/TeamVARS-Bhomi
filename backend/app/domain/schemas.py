@@ -14,6 +14,8 @@ class EvidenceAnchor(BaseModel):
     bbox: list[float] = Field(min_length=4, max_length=4)
     text: str = ""
     method: str = "local-text-anchor"
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    source: str = ""
 
 
 class Evidence(BaseModel):
