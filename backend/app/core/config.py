@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     sarvam_document_language: str = "hi-IN"
     land_record_state: str = "UP"
 
+    nvidia_api_key: str | None = None
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    nvidia_model: str = "openai/gpt-oss-20b"
+
+    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_model: str = "qwen2.5:7b-instruct"
+
     openmodel_api_key: str | None = None
     openmodel_base_url: str = "https://api.openmodel.ai"
     openmodel_model: str | None = None
