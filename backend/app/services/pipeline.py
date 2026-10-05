@@ -478,7 +478,7 @@ async def analyze_case(
                     digitise_results = []
                     latest_job_id = None
 
-                    extraction_provider = 'sarvam'
+                    extraction_provider = reasoning_provider
                     merged = None
                     annotations = {}
                     source_pages = {}
