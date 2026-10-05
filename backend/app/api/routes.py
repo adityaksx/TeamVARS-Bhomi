@@ -1,7 +1,8 @@
 import httpx
 import io
+from pathlib import Path
 
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
@@ -153,6 +154,28 @@ async def case_dashboard(case_id: str) -> dict:
         return case["analysis"]
 
     return build_dashboard(case, settings.ai_provider)
+
+
+@router.get("/cases/{case_id}/documents/{document_id}/content")
+async def document_content(case_id: str, document_id: str):
+    case = case_store.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    document = case.get("documents", {}).get(document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    path = Path(document["storage_path"])
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Document file not found")
+
+    return FileResponse(
+        path,
+        media_type=document.get("content_type") or "application/octet-stream",
+        filename=document.get("filename", path.name),
+        content_disposition_type="inline",
+    )
 
 
 @router.get("/cases/{case_id}/report")
