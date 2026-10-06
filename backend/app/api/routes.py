@@ -314,12 +314,29 @@ async def case_report(case_id: str):
 
 
 @router.post("/cases/{case_id}/explain")
-async def explain_case(case_id: str, payload: ExplainRequest, x_sarvam_api_key: str | None = Header(default=None, alias="X-Sarvam-Api-Key"), x_gemini_api_key: str | None = Header(default=None, alias="X-Gemini-Api-Key"), x_grok_api_key: str | None = Header(default=None, alias="X-Grok-Api-Key")) -> dict:
+async def explain_case(
+    case_id: str,
+    payload: ExplainRequest,
+    x_sarvam_api_key: str | None = Header(default=None, alias="X-Sarvam-Api-Key"),
+    x_gemini_api_key: str | None = Header(default=None, alias="X-Gemini-Api-Key"),
+    x_grok_api_key: str | None = Header(default=None, alias="X-Grok-Api-Key"),
+    x_ollama_base_url: str | None = Header(default=None, alias="X-Ollama-Base-Url"),
+    x_ollama_model: str | None = Header(default=None, alias="X-Ollama-Model"),
+) -> dict:
     case = case_store.get_case(case_id)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
-    provider = get_provider(request_settings(x_sarvam_api_key, x_gemini_api_key, x_grok_api_key), payload.provider)
+    provider = get_provider(
+        request_settings(
+            x_sarvam_api_key,
+            x_gemini_api_key,
+            x_grok_api_key,
+            x_ollama_base_url,
+            x_ollama_model,
+        ),
+        payload.provider,
+    )
     context = payload.finding
     result = await provider.chat(
         system=(
@@ -338,8 +355,24 @@ async def explain_case(case_id: str, payload: ExplainRequest, x_sarvam_api_key: 
 
 
 @router.post("/chat")
-async def chat(payload: ChatRequest, x_sarvam_api_key: str | None = Header(default=None, alias="X-Sarvam-Api-Key"), x_gemini_api_key: str | None = Header(default=None, alias="X-Gemini-Api-Key"), x_grok_api_key: str | None = Header(default=None, alias="X-Grok-Api-Key")) -> dict:
-    provider = get_provider(request_settings(x_sarvam_api_key, x_gemini_api_key, x_grok_api_key), payload.provider)
+async def chat(
+    payload: ChatRequest,
+    x_sarvam_api_key: str | None = Header(default=None, alias="X-Sarvam-Api-Key"),
+    x_gemini_api_key: str | None = Header(default=None, alias="X-Gemini-Api-Key"),
+    x_grok_api_key: str | None = Header(default=None, alias="X-Grok-Api-Key"),
+    x_ollama_base_url: str | None = Header(default=None, alias="X-Ollama-Base-Url"),
+    x_ollama_model: str | None = Header(default=None, alias="X-Ollama-Model"),
+) -> dict:
+    provider = get_provider(
+        request_settings(
+            x_sarvam_api_key,
+            x_gemini_api_key,
+            x_grok_api_key,
+            x_ollama_base_url,
+            x_ollama_model,
+        ),
+        payload.provider,
+    )
     result = await provider.chat(
         system=(
             "You are BhoomiLens, an evidence-constrained land-record reconciliation assistant. "
