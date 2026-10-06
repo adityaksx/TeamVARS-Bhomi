@@ -147,14 +147,31 @@ export default function BhoomiConsole() {
   }
 
   function requestHeaders() {
-    return { ...(apiKeys.sarvam ? { "X-Sarvam-Api-Key": apiKeys.sarvam } : {}), ...(apiKeys.gemini ? { "X-Gemini-Api-Key": apiKeys.gemini } : {}), ...(apiKeys.grok ? { "X-Grok-Api-Key": apiKeys.grok } : {}), "X-Ollama-Base-Url": ollamaBaseUrl, "X-Ollama-Model": ollamaModel };
+    return {
+      ...(apiKeys.sarvam ? { "X-Sarvam-Api-Key": apiKeys.sarvam } : {}),
+      ...(apiKeys.gemini ? { "X-Gemini-Api-Key": apiKeys.gemini } : {}),
+      ...(apiKeys.grok ? { "X-Grok-Api-Key": apiKeys.grok } : {}),
+      ...(ollamaBaseUrl ? { "X-Ollama-Base-Url": ollamaBaseUrl } : {}),
+      ...(ollamaModel ? { "X-Ollama-Model": ollamaModel } : {}),
+    };
+  }
+
+  function resolvedProvider(): Provider {
+    if (provider !== "auto") return provider;
+    if (apiKeys.sarvam) return "sarvam";
+    if (apiKeys.gemini) return "gemini";
+    if (apiKeys.grok) return "grok";
+    if (ollamaBaseUrl && ollamaModel) return "ollama";
+    return "mock";
   }
 
   function providerConfigured(id: Provider) {
-    if (id === "sarvam") return Boolean(apiKeys.sarvam) || Boolean(providers.find((item) => item.id === id)?.configured);
-    if (id === "gemini") return Boolean(apiKeys.gemini) || Boolean(providers.find((item) => item.id === id)?.configured);
-    if (id === "grok") return Boolean(apiKeys.grok) || Boolean(providers.find((item) => item.id === id)?.configured);
-    return providers.find((item) => item.id === id)?.configured ?? id === "ollama";
+    if (id === "auto" || id === "mock") return true;
+    if (id === "sarvam") return Boolean(apiKeys.sarvam);
+    if (id === "gemini") return Boolean(apiKeys.gemini);
+    if (id === "grok") return Boolean(apiKeys.grok);
+    if (id === "ollama" || id === "local") return Boolean(ollamaBaseUrl && ollamaModel);
+    return false;
   }
 
   useEffect(() => {
@@ -238,7 +255,7 @@ export default function BhoomiConsole() {
 
       setUploadStatus("Reconciliation queued…");
       await jsonFetch(
-        `/cases/${activeCaseId}/analyze?reasoning_provider=${provider}`,
+        `/cases/${activeCaseId}/analyze?reasoning_provider=${resolvedProvider()}`,
         { method: "POST", headers: requestHeaders() }
       );
 
@@ -307,7 +324,7 @@ export default function BhoomiConsole() {
 
       const body = await jsonFetch("/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...requestHeaders() },
         body: JSON.stringify({
           message: `${question}\n\nCASE EVIDENCE:\n${JSON.stringify(context)}`,
           provider,
