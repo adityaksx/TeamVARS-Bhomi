@@ -16,11 +16,13 @@ class ProviderTestResult(BaseModel):
     error_code: Optional[ProviderErrorCode] = None
     error_message: Optional[str] = None
     raw_provider_status: Optional[str] = None
+    fallback_used: bool = False
     details: Dict[str, Any] = Field(default_factory=dict)
 
     def to_summary(self) -> str:
         if self.usable:
-            return f"PASS ({self.latency_ms} ms, model: {self.model})"
+            fb = " [fallback]" if self.fallback_used else ""
+            return f"PASS ({self.latency_ms} ms, model: {self.model}{fb})"
         err = self.error_code.value if self.error_code else "ERROR"
         return f"FAIL [{err}] {self.error_message or 'Unknown error'} (status: {self.http_status})"
 
@@ -30,5 +32,6 @@ class ProviderChatResult(BaseModel):
     model: str
     text: str
     latency_ms: int = 0
+    fallback_used: bool = False
     usage: Optional[Dict[str, Any]] = None
     thinking_tokens: Optional[int] = None

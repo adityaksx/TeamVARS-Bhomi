@@ -77,8 +77,14 @@ def _ensure_postgres() -> None:
                 name TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 status TEXT NOT NULL,
+                stage TEXT,
                 analysis JSONB
             )
+            """
+        )
+        connection.execute(
+            """
+            ALTER TABLE cases ADD COLUMN IF NOT EXISTS stage TEXT;
             """
         )
         connection.execute(
@@ -92,6 +98,7 @@ def _ensure_postgres() -> None:
                 storage_path TEXT NOT NULL,
                 uploaded_at TEXT NOT NULL,
                 status TEXT NOT NULL,
+                stage TEXT,
                 job_id TEXT,
                 extracted JSONB NOT NULL DEFAULT '{}'::jsonb,
                 normalized JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -100,6 +107,11 @@ def _ensure_postgres() -> None:
                 source_anchors JSONB NOT NULL DEFAULT '{}'::jsonb,
                 page_count INTEGER
             )
+            """
+        )
+        connection.execute(
+            """
+            ALTER TABLE documents ADD COLUMN IF NOT EXISTS stage TEXT;
             """
         )
     _PG_READY = True
@@ -118,7 +130,7 @@ def _pg_case(case_id: str) -> dict[str, Any] | None:
     _ensure_postgres()
     with psycopg.connect(_settings().database_url) as connection:
         case_row = connection.execute(
-            "SELECT id, name, created_at, status, analysis FROM cases WHERE id = %s",
+            "SELECT id, name, created_at, status, stage, analysis FROM cases WHERE id = %s",
             (case_id,),
         ).fetchone()
         if not case_row:
@@ -126,7 +138,7 @@ def _pg_case(case_id: str) -> dict[str, Any] | None:
         document_rows = connection.execute(
             """
             SELECT id, filename, content_type, size, storage_path, uploaded_at,
-                   status, job_id, extracted, normalized, annotations,
+                   status, stage, job_id, extracted, normalized, annotations,
                    source_pages, source_anchors, page_count
             FROM documents WHERE case_id = %s ORDER BY uploaded_at
             """,
@@ -138,7 +150,8 @@ def _pg_case(case_id: str) -> dict[str, Any] | None:
         "name": case_row[1],
         "created_at": case_row[2],
         "status": case_row[3],
-        "analysis": case_row[4],
+        "stage": case_row[4] or "queued",
+        "analysis": case_row[5],
         "documents": {
             row[0]: {
                 "id": row[0],
@@ -148,13 +161,14 @@ def _pg_case(case_id: str) -> dict[str, Any] | None:
                 "storage_path": row[4],
                 "uploaded_at": row[5],
                 "status": row[6],
-                "job_id": row[7],
-                "extracted": row[8] or {},
-                "normalized": row[9] or {},
-                "annotations": row[10] or {},
-                "source_pages": row[11] or {},
-                "source_anchors": row[12] or {},
-                "page_count": row[13],
+                "stage": row[7] or "uploaded",
+                "job_id": row[8],
+                "extracted": row[9] or {},
+                "normalized": row[10] or {},
+                "annotations": row[11] or {},
+                "source_pages": row[12] or {},
+                "source_anchors": row[13] or {},
+                "page_count": row[14],
             }
             for row in document_rows
         },
@@ -168,6 +182,7 @@ def create_case(name: str = "Untitled property review") -> dict[str, Any]:
         "name": name,
         "created_at": _now(),
         "status": "draft",
+        "stage": "draft",
         "analysis": None,
         "documents": {},
     }
@@ -177,8 +192,8 @@ def create_case(name: str = "Untitled property review") -> dict[str, Any]:
             _ensure_postgres()
             with psycopg.connect(_settings().database_url) as connection:
                 connection.execute(
-                    "INSERT INTO cases (id, name, created_at, status, analysis) VALUES (%s, %s, %s, %s, %s)",
-                    (case_id, name, case["created_at"], "draft", None),
+                    "INSERT INTO cases (id, name, created_at, status, stage, analysis) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (case_id, name, case["created_at"], "draft", "draft", None),
                 )
         else:
             data = _read()
@@ -213,7 +228,7 @@ def update_case(case_id: str, **changes: Any) -> dict[str, Any]:
     with _LOCK:
         if _use_postgres():
             import psycopg
-            allowed = {"name", "created_at", "status", "analysis"}
+            allowed = {"name", "created_at", "status", "stage", "analysis"}
             invalid = set(changes) - allowed
             if invalid:
                 raise ValueError(f"Unsupported case fields: {sorted(invalid)}")
@@ -257,6 +272,7 @@ def add_document(case_id: str, filename: str, content_type: str, content: bytes)
             "storage_path": str(storage_path),
             "uploaded_at": _now(),
             "status": "uploaded",
+            "stage": "uploaded",
             "job_id": None,
             "extracted": {},
             "normalized": {},
@@ -274,14 +290,14 @@ def add_document(case_id: str, filename: str, content_type: str, content: bytes)
                         """
                         INSERT INTO documents (
                             id, case_id, filename, content_type, size, storage_path,
-                            uploaded_at, status, job_id, extracted, normalized,
+                            uploaded_at, status, stage, job_id, extracted, normalized,
                             annotations, source_pages, source_anchors, page_count
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             document["id"], case_id, document["filename"], content_type,
                             document["size"], document["storage_path"], document["uploaded_at"],
-                            document["status"], None, {}, {}, {}, {}, {}, None,
+                            document["status"], document["stage"], None, {}, {}, {}, {}, {}, None,
                         ),
                     )
             else:
@@ -303,7 +319,7 @@ def update_document(case_id: str, document_id: str, **changes: Any) -> dict[str,
             import psycopg
             allowed = {
                 "filename", "content_type", "size", "storage_path", "uploaded_at",
-                "status", "job_id", "extracted", "normalized", "annotations",
+                "status", "stage", "job_id", "extracted", "normalized", "annotations",
                 "source_pages", "source_anchors", "page_count",
             }
             invalid = set(changes) - allowed

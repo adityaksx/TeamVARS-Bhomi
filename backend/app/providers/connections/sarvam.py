@@ -109,9 +109,15 @@ class SarvamConnection(BaseProviderConnection):
             "reasoning_effort": "low",
         }
 
-        attempts = 1
+        attempts = 0
+
+        async def _call():
+            nonlocal attempts
+            attempts += 1
+            return await self._post_chat(payload)
+
         try:
-            data, status = await self._post_chat(payload)
+            (data, status), total_attempts = await execute_with_retry(_call, max_attempts=3)
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
 
             choices = data.get("choices") or []
@@ -124,7 +130,7 @@ class SarvamConnection(BaseProviderConnection):
                     model=self.model,
                     http_status=status,
                     latency_ms=elapsed_ms,
-                    attempts=attempts,
+                    attempts=total_attempts,
                     error_code=ProviderErrorCode.RESPONSE_PARSE_ERROR,
                     error_message="Sarvam returned no choices in response.",
                 )
@@ -141,7 +147,7 @@ class SarvamConnection(BaseProviderConnection):
                 model=self.model,
                 http_status=status,
                 latency_ms=elapsed_ms,
-                attempts=attempts,
+                attempts=total_attempts,
                 details={
                     "sample_reply": content.strip()[:100],
                     "usage": usage,
@@ -157,7 +163,7 @@ class SarvamConnection(BaseProviderConnection):
                 model=self.model,
                 http_status=exc.http_status,
                 latency_ms=elapsed_ms,
-                attempts=attempts,
+                attempts=max(1, attempts),
                 retryable=exc.retryable,
                 error_code=exc.code,
                 error_message=exc.message,

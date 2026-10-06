@@ -131,9 +131,36 @@ async def provider_test(
         try:
             ai_provider = get_provider(request_config, selected)
             result = await ai_provider.chat(system="Reply with exactly: OK", user="Connectivity test. Reply with exactly: OK")
-            return {"ok": True, "provider": result.provider, "model": result.model, "answer": result.text, "usable": True, "latency_ms": 0}
+            return {
+                "ok": True,
+                "success": True,
+                "status": "connected",
+                "provider": result.provider,
+                "model": result.model,
+                "answer": result.text,
+                "usable": True,
+                "latency_ms": 0,
+                "attempts": 1,
+                "fallback_used": False,
+                "error": None,
+            }
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"grok connectivity test failed: {exc}") from exc
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "ok": False,
+                    "success": False,
+                    "status": "error",
+                    "provider": "grok",
+                    "model": request_config.grok_model,
+                    "usable": False,
+                    "latency_ms": 0,
+                    "attempts": 1,
+                    "fallback_used": False,
+                    "error": str(exc),
+                    "detail": f"[ERROR] grok connectivity test failed: {exc}",
+                },
+            )
 
     api_key_override = (
         x_sarvam_api_key if selected == "sarvam"
@@ -150,6 +177,10 @@ async def provider_test(
 
     data = test_result.model_dump()
     data["ok"] = test_result.usable
+    data["success"] = test_result.usable
+    data["status"] = "connected" if test_result.usable else (test_result.error_code.value if test_result.error_code else "error")
+    data["fallback_used"] = getattr(test_result, "fallback_used", False)
+    data["error"] = test_result.error_message
     data["answer"] = (test_result.details or {}).get("sample_reply", "OK")
     if not test_result.usable:
         error_msg = test_result.error_message or "Connection failed"
@@ -257,9 +288,9 @@ async def analyze(
     if provider not in {"auto", "mock", "sarvam", "gemini", "grok", "ollama", "local"}:
         raise HTTPException(status_code=400, detail="Unsupported reasoning provider")
 
+    case_store.update_case(case_id, status="queued", stage="queued")
     background_tasks.add_task(analyze_case, case_id, request_settings(x_sarvam_api_key, x_gemini_api_key, x_grok_api_key, x_ollama_base_url, x_ollama_model), provider)
-    case_store.update_case(case_id, status="queued")
-    return {"case_id": case_id, "status": "queued", "reasoning_provider": provider}
+    return {"case_id": case_id, "status": "queued", "stage": "queued", "reasoning_provider": provider}
 
 
 @router.get("/cases/{case_id}/dashboard")

@@ -15,6 +15,6 @@ class OllamaProvider(AIProvider):
             enable_thinking=False,
         )
 
-    async def chat(self, system: str, user: str) -> AIResult:
-        result = await self.connection.chat(system, user)
+    async def chat(self, system: str, user: str, images: list[str] | None = None) -> AIResult:
+        result = await self.connection.chat(system, user, images=images)
         return AIResult(provider=self.name, model=result.model, text=result.text)

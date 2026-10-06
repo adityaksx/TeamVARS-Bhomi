@@ -210,3 +210,16 @@ button:disabled { cursor: not-allowed; }
 .settings-diag.pass { background: #eef7ee; color: #1e5a22; border: 1px solid #c7e5c7; }
 .settings-diag.fail { background: #fdf0f0; color: #9c2727; border: 1px solid #f5c2c2; }
 .settings-diag.pending { background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; }
+
+.diagnostics-panel { margin-top: 18px; }
+.diagnostics-table-wrap { overflow-x: auto; padding: 12px 16px 16px; }
+.diagnostics-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
+.diagnostics-table th { padding: 8px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; }
+.diagnostics-table td { padding: 9px 10px; border-bottom: 1px solid #eeece3; vertical-align: middle; }
+.diagnostics-table tr:last-child td { border-bottom: 0; }
+.diagnostics-table code { font-size: 11px; background: rgba(0,0,0,0.04); padding: 2px 6px; border-radius: 4px; font-family: monospace; }
+.status-pill { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.pill-pass { background: #eef7ee; color: #1e5a22; border: 1px solid #c7e5c7; }
+.pill-fail { background: #fdf0f0; color: #9c2727; border: 1px solid #f5c2c2; }
+.pill-pending { background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; }
+

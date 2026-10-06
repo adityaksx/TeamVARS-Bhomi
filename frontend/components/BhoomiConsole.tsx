@@ -133,11 +133,22 @@ export default function BhoomiConsole() {
   const [analysisRunning, setAnalysisRunning] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [activeEvidence, setActiveEvidence] = useState<Evidence | null>(null);
+  const [diagnostics, setDiagnostics] = useState<{
+    id: string;
+    filename: string;
+    type: string;
+    stage: string;
+    status: string;
+    pageCount: number;
+  }[] | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     try {
-      setApiKeys({ sarvam: localStorage.getItem("bhoomilens_sarvam_key") ?? "", gemini: localStorage.getItem("bhoomilens_gemini_key") ?? "", grok: localStorage.getItem("bhoomilens_grok_key") ?? "" });
+      // Security: purge any previously persisted API keys from localStorage
+      localStorage.removeItem("bhoomilens_sarvam_key");
+      localStorage.removeItem("bhoomilens_gemini_key");
+      localStorage.removeItem("bhoomilens_grok_key");
       setOllamaBaseUrl(localStorage.getItem("bhoomilens_ollama_url") ?? "http://localhost:11434");
       setOllamaModel(localStorage.getItem("bhoomilens_ollama_model") ?? "qwen3:8b");
     } catch {}
@@ -184,9 +195,16 @@ export default function BhoomiConsole() {
     }
   }
   function saveSettings() {
-    localStorage.setItem("bhoomilens_sarvam_key", apiKeys.sarvam); localStorage.setItem("bhoomilens_gemini_key", apiKeys.gemini); localStorage.setItem("bhoomilens_grok_key", apiKeys.grok);
-    localStorage.setItem("bhoomilens_ollama_url", ollamaBaseUrl); localStorage.setItem("bhoomilens_ollama_model", ollamaModel);
-    setSettingsOpen(false); setUploadStatus("AI provider settings saved locally in this browser.");
+    try {
+      // Security: never persist API keys in localStorage
+      localStorage.removeItem("bhoomilens_sarvam_key");
+      localStorage.removeItem("bhoomilens_gemini_key");
+      localStorage.removeItem("bhoomilens_grok_key");
+      localStorage.setItem("bhoomilens_ollama_url", ollamaBaseUrl);
+      localStorage.setItem("bhoomilens_ollama_model", ollamaModel);
+    } catch {}
+    setSettingsOpen(false);
+    setUploadStatus("Preferences saved. API keys remain in-memory for this session only.");
   }
 
   function requestHeaders() {
@@ -311,6 +329,28 @@ export default function BhoomiConsole() {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         const caseState = await jsonFetch(`/cases/${activeCaseId}`);
 
+        if (caseState.documents) {
+          const docs = Object.values(caseState.documents) as {
+            id: string;
+            filename: string;
+            stage?: string;
+            status?: string;
+            page_count?: number;
+            normalized?: { document_type?: string };
+            extracted?: { document_type?: string };
+          }[];
+          setDiagnostics(
+            docs.map((doc) => ({
+              id: doc.id,
+              filename: doc.filename,
+              type: doc.normalized?.document_type || doc.extracted?.document_type || "Detecting…",
+              stage: doc.stage || doc.status || "processing",
+              status: doc.status || "processing",
+              pageCount: doc.page_count || 1,
+            }))
+          );
+        }
+
         if (caseState.status === "completed") {
           const dashboard = await jsonFetch(
             `/cases/${activeCaseId}/dashboard`
@@ -325,21 +365,31 @@ export default function BhoomiConsole() {
         }
 
         if (caseState.status === "failed") {
+          const errCode = caseState.analysis?.error_code ? `[${caseState.analysis.error_code}] ` : "";
+          const stageInfo = caseState.stage ? ` (at stage: ${caseState.stage})` : "";
           throw new Error(
-            caseState.analysis?.error ?? "Document analysis failed"
+            `${errCode}${caseState.analysis?.error ?? "Document analysis failed"}${stageInfo}`
           );
         }
 
-        setUploadStatus(
-          caseState.status === "processing"
-            ? "Reading and reconciling documents…"
-            : "Analysis queued…"
-        );
+        const stage = caseState.stage || caseState.status;
+        const stageLabels: Record<string, string> = {
+          queued: "Reconciliation queued…",
+          detecting_document: "Detecting document layout & structure…",
+          extracting_text: "Extracting machine-readable text…",
+          ocr_fallback: "Running OCR / visual document extraction fallback…",
+          sarvam_extraction: "Processing with Sarvam Document AI…",
+          ai_extraction: "Extracting land record entities with AI…",
+          normalizing: "Normalizing entities & running cross-record reconciliation…",
+          processing: "Reconciling records…",
+        };
+        const label = stageLabels[stage] || `Processing (${stage})…`;
+        setUploadStatus(`${label} (${attempt + 1}/80)`);
       }
 
       if (!completed) {
         throw new Error(
-          "Analysis is taking longer than expected. Check the case status and retry."
+          "Analysis timed out after 120s. Check provider connection and retry."
         );
       }
     } catch (error) {
@@ -859,6 +909,52 @@ export default function BhoomiConsole() {
           </div>
         </div>
       </section>
+
+      {diagnostics && diagnostics.length > 0 && (
+        <section className="diagnostics-panel panel">
+          <PanelTitle
+            kicker="PROCESSING AUDIT"
+            title="Document pipeline diagnostics"
+            action={<span className="count-badge">{diagnostics.length} documents</span>}
+          />
+          <div className="diagnostics-table-wrap">
+            <table className="diagnostics-table">
+              <thead>
+                <tr>
+                  <th>Document</th>
+                  <th>Detected record type</th>
+                  <th>Processing stage</th>
+                  <th>Pages</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diagnostics.map((diag) => (
+                  <tr key={diag.id}>
+                    <td><strong>{diag.filename}</strong></td>
+                    <td>{diag.type}</td>
+                    <td><code>{diag.stage}</code></td>
+                    <td>{diag.pageCount}</td>
+                    <td>
+                      <span
+                        className={`status-pill ${
+                          diag.status === "completed"
+                            ? "pill-pass"
+                            : diag.status === "failed"
+                            ? "pill-fail"
+                            : "pill-pending"
+                        }`}
+                      >
+                        {diag.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <section className="assistant-panel panel">
         <div className="assistant-left">

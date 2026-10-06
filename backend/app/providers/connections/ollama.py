@@ -185,12 +185,20 @@ class OllamaConnection(BaseProviderConnection):
             },
         )
 
-    async def chat(self, system: str, user: str) -> ProviderChatResult:
+    async def chat(
+        self,
+        system: str,
+        user: str,
+        images: Optional[List[str]] = None,
+    ) -> ProviderChatResult:
         start_time = time.perf_counter()
         messages = []
         if system.strip():
             messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": user})
+        user_message: Dict[str, Any] = {"role": "user", "content": user}
+        if images:
+            user_message["images"] = images
+        messages.append(user_message)
 
         payload = {
             "model": self.model,

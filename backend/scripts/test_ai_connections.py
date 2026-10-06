@@ -25,7 +25,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="BhoomiLens AI Provider Connection Diagnostic CLI")
     parser.add_argument(
         "--provider",
-        choices=["sarvam", "gemini", "ollama", "all"],
+        choices=["sarvam", "gemini", "grok", "ollama", "mock", "all"],
         default="all",
         help="Provider to test (default: all)",
     )
@@ -52,6 +52,12 @@ def parse_args():
         type=str,
         default=None,
         help="Override API key (runtime only; not logged or persisted)",
+    )
+    parser.add_argument(
+        "--document",
+        type=str,
+        default=None,
+        help="Path to PDF document to test end-to-end extraction diagnostics",
     )
     parser.add_argument(
         "--interactive",
@@ -137,9 +143,93 @@ async def run_diagnostic(provider: str, args, settings):
     return summary
 
 
+async def run_document_diagnostic(doc_path: Path, args, settings):
+    import time
+    from app.services.fallback_extraction import (
+        extract_text,
+        extract_with_fallback,
+        DocumentProcessingError,
+    )
+    from app.services.pipeline import EXTRACTION_SCHEMA
+
+    print("=" * 60)
+    print(f"DOCUMENT DIAGNOSTIC: {doc_path.name}")
+    print("=" * 60)
+    if not doc_path.exists():
+        print(f"ERROR: File does not exist at {doc_path}")
+        return False
+
+    print(f"File Path: {doc_path.resolve()}")
+    print(f"File Size: {doc_path.stat().st_size:,} bytes")
+    print(f"File Type: {doc_path.suffix.upper()}")
+    print("-" * 60)
+
+    # Stage 1: Native Text Extraction
+    start_t = time.perf_counter()
+    native_text = extract_text(doc_path)
+    text_ms = int((time.perf_counter() - start_t) * 1000)
+    char_count = len(native_text)
+    print(f"Stage 1 [extracting_text]: Extracted {char_count} chars in {text_ms} ms")
+    if char_count == 0:
+        print("  Notice: No machine-readable text found (scanned or image-only PDF).")
+    else:
+        sample = native_text.replace("\n", " ")[:120]
+        print(f"  Sample: {sample}...")
+
+    # Stage 2: Full Extraction (with OCR / vision / AI fallback)
+    print("-" * 60)
+    preferred = args.provider if args.provider != "all" else "auto"
+    print(f"Stage 2 [ai_extraction]: Running extraction (preferred='{preferred}')...")
+
+    # Apply runtime API overrides if specified
+    run_settings = settings
+    if args.api_key:
+        if args.provider == "sarvam":
+            run_settings = run_settings.model_copy(update={"sarvam_api_key": args.api_key})
+        elif args.provider == "gemini":
+            run_settings = run_settings.model_copy(update={"gemini_api_key": args.api_key})
+
+    start_ai = time.perf_counter()
+    try:
+        if preferred == "mock":
+            from app.services.pipeline import _fixture_for
+            extracted = _fixture_for(doc_path.name)
+            provider_used = "mock"
+        else:
+            extracted, provider_used = await extract_with_fallback(
+                settings=run_settings,
+                path=doc_path,
+                schema=EXTRACTION_SCHEMA,
+                preferred=preferred,
+            )
+        ai_ms = int((time.perf_counter() - start_ai) * 1000)
+        print(f"PASS: Extracted by '{provider_used}' in {ai_ms} ms")
+        print(f"  Detected type: {extracted.get('document_type', 'Unknown')}")
+        print(f"  Survey/Gata:   {extracted.get('survey_number') or extracted.get('gata_number') or 'None'}")
+        print(f"  Owners:        {extracted.get('owner_names', [])}")
+        print(f"  Location:      {extracted.get('village', '')}, {extracted.get('tehsil', '')}, {extracted.get('district', '')}")
+        print("=" * 60)
+        return True
+    except DocumentProcessingError as exc:
+        ai_ms = int((time.perf_counter() - start_ai) * 1000)
+        print(f"FAIL [{exc.stage} - {exc.error_code}] in {ai_ms} ms: {exc.message}")
+        print("=" * 60)
+        return False
+    except Exception as exc:
+        ai_ms = int((time.perf_counter() - start_ai) * 1000)
+        print(f"FAIL [UNEXPECTED_ERROR] in {ai_ms} ms: {exc}")
+        print("=" * 60)
+        return False
+
+
 async def main():
     args = parse_args()
     settings = get_settings()
+
+    if args.document:
+        doc_path = Path(args.document)
+        success = await run_document_diagnostic(doc_path, args, settings)
+        sys.exit(0 if success else 1)
 
     providers = ["sarvam", "gemini", "ollama"] if args.provider == "all" else [args.provider]
 

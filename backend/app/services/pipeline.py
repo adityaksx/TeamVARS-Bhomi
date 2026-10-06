@@ -7,6 +7,12 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings
+from app.core.logging import (
+    get_logger,
+    current_stage,
+    current_document_id,
+    current_request_id,
+)
 from app.services import case_store
 from app.services.document_view import build_source_anchors, page_count
 from app.services.normalization import normalize_document
@@ -15,6 +21,8 @@ from app.services.rules import build_coverage, reconcile_documents
 from app.adapters.uttar_pradesh import adapt_up_document
 from app.services.storage import materialize
 from app.services.fallback_extraction import extract_with_fallback
+
+logger = get_logger()
 
 EXTRACTION_SCHEMA = json.dumps(
     {
@@ -449,13 +457,24 @@ async def analyze_case(
 ) -> None:
     case = case_store.get_case(case_id)
     if not case:
+        logger.warning(f"Case {case_id} not found for analysis.")
         return
 
-    case_store.update_case(case_id, status="processing", analysis=None)
+    logger.info(f"Starting case analysis for {case_id} with provider '{reasoning_provider}'")
+    current_stage.set("detecting_document")
+    case_store.update_case(case_id, status="processing", stage="detecting_document", analysis=None)
     documents = list(case.get("documents", {}).values())
 
+    active_doc_id = None
     try:
         for document in documents:
+            active_doc_id = document["id"]
+            current_document_id.set(active_doc_id)
+            current_stage.set("detecting_document")
+            case_store.update_document(case_id, active_doc_id, status="processing", stage="detecting_document")
+            case_store.update_case(case_id, stage="detecting_document")
+            logger.info(f"Processing document {document['filename']} ({active_doc_id}) in case {case_id}")
+
             with materialize(document["storage_path"]) as original:
                 is_pdf = original.suffix.casefold() == ".pdf"
                 chunk_dir = case_store.UPLOADS / case_id / f"{document['id']}_chunks"
@@ -484,7 +503,15 @@ async def analyze_case(
                     source_pages = {}
                     sarvam_error = None
 
-                    if settings.sarvam_api_key and extraction_provider in {'auto', 'fallback', 'sarvam'}:
+                    if extraction_provider == "mock":
+                        logger.info(f"Using mock deterministic extraction fixture for {document['filename']}")
+                        merged = _fixture_for(document["filename"])
+                        source_pages = {'owner_names': 1, 'survey_number': 1, 'land_extent': 1}
+                    elif settings.sarvam_api_key and extraction_provider in {'auto', 'fallback', 'sarvam'}:
+                        current_stage.set("sarvam_extraction")
+                        case_store.update_document(case_id, active_doc_id, stage="sarvam_extraction")
+                        case_store.update_case(case_id, stage="sarvam_extraction")
+                        logger.info(f"Submitting {document['filename']} to Sarvam AI...")
                         try:
                             for chunk in chunks:
                                 submitted = await _submit_sarvam(settings, document, chunk.path)
@@ -502,13 +529,17 @@ async def analyze_case(
                             merged, annotations, source_pages = _merge_chunk_results(chunk_results)
                         except Exception as exc:
                             sarvam_error = str(exc)
+                            logger.warning(f"Sarvam extraction failed for {document['filename']}: {exc}")
                             merged = None
 
-                    if not merged:
+                    if not merged and extraction_provider != "mock":
                         try:
+                            case_store.update_document(case_id, active_doc_id, stage="extracting_text")
+                            case_store.update_case(case_id, stage="extracting_text")
                             merged, extraction_provider = await extract_with_fallback(
                                 settings, original, EXTRACTION_SCHEMA,
                                 extraction_provider if extraction_provider in {'gemini', 'grok', 'ollama', 'local'} else 'auto',
+                                document_id=active_doc_id,
                             )
                         except Exception as fallback_error:
                             if sarvam_error:
@@ -519,6 +550,10 @@ async def analyze_case(
                             raise
                         source_pages = {'owner_names': 1, 'survey_number': 1, 'land_extent': 1}
 
+                    current_stage.set("normalizing")
+                    case_store.update_document(case_id, active_doc_id, stage="normalizing")
+                    case_store.update_case(case_id, stage="normalizing")
+                    logger.info(f"Normalizing extracted entities for {document['filename']}")
                     merged = adapt_up_document(merged)
                     normalized = normalize_document(merged)
                     source_anchors = {}
@@ -543,6 +578,7 @@ async def analyze_case(
 
                     update_fields = {
                         "status": "completed",
+                        "stage": "completed",
                         "extracted": merged,
                         "normalized": normalized,
                         "annotations": annotations,
@@ -558,21 +594,46 @@ async def analyze_case(
                         document["id"],
                         **update_fields,
                     )
+                    logger.info(f"Document {document['filename']} completed successfully.")
                 finally:
                     if chunk_dir.exists() and chunk_dir != original.parent:
                         shutil.rmtree(chunk_dir, ignore_errors=True)
 
+        current_stage.set("completed")
         fresh = case_store.get_case(case_id) or case
         dashboard = build_dashboard(fresh, reasoning_provider)
         case_store.update_case(
             case_id,
             status="completed",
+            stage="completed",
             analysis=dashboard,
         )
+        logger.info(f"Case {case_id} analysis completed successfully (score: {dashboard.get('score')})")
 
     except Exception as exc:
+        err_stage = getattr(exc, "stage", current_stage.get() or "failed")
+        err_code = getattr(exc, "error_code", "ANALYSIS_FAILED")
+        logger.exception(f"Case {case_id} analysis failed at stage '{err_stage}': {exc}")
+
+        if active_doc_id:
+            try:
+                case_store.update_document(
+                    case_id,
+                    active_doc_id,
+                    status="failed",
+                    stage=err_stage,
+                )
+            except Exception:
+                pass
+
         case_store.update_case(
             case_id,
             status="failed",
-            analysis={"error": str(exc), "case_id": case_id},
+            stage=err_stage,
+            analysis={
+                "error": str(exc),
+                "error_code": err_code,
+                "stage": err_stage,
+                "case_id": case_id,
+            },
         )
