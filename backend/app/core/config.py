@@ -1,10 +1,14 @@
+from pathlib import Path
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+_ENV_PATHS = (_BACKEND_DIR / ".env", _BACKEND_DIR.parent / ".env", ".env")
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_ENV_PATHS, env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "BhoomiLens API"
     ai_provider: str = "auto"
@@ -18,13 +22,13 @@ class Settings(BaseSettings):
 
     gemini_api_key: str | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
 
     grok_api_key: str | None = None
     grok_base_url: str = "https://api.x.ai/v1"
     grok_model: str = "grok-4.7"
 
-    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3:8b"
 
     openmodel_api_key: str | None = None

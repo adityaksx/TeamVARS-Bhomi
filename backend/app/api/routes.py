@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.providers.factory import get_provider
+from app.providers.connections.runner import test_provider_connection
 from app.services import case_store
 from app.services.document_view import render_page
 from app.services.pipeline import analyze_case, build_dashboard
@@ -125,14 +126,38 @@ async def provider_test(
         raise HTTPException(status_code=400, detail="Unsupported provider connectivity test")
     request_config = request_settings(x_sarvam_api_key, x_gemini_api_key, x_grok_api_key, x_ollama_base_url, x_ollama_model)
     selected = "ollama" if provider == "local" else provider
-    try:
-        ai_provider = get_provider(request_config, selected)
-        result = await ai_provider.chat(system="Reply with exactly: OK", user="Connectivity test. Reply with exactly: OK")
-        return {"ok": True, "provider": result.provider, "model": result.model, "answer": result.text}
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"{selected} connectivity test failed: {exc}") from exc
+
+    if selected == "grok":
+        try:
+            ai_provider = get_provider(request_config, selected)
+            result = await ai_provider.chat(system="Reply with exactly: OK", user="Connectivity test. Reply with exactly: OK")
+            return {"ok": True, "provider": result.provider, "model": result.model, "answer": result.text, "usable": True, "latency_ms": 0}
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"grok connectivity test failed: {exc}") from exc
+
+    api_key_override = (
+        x_sarvam_api_key if selected == "sarvam"
+        else x_gemini_api_key if selected == "gemini"
+        else None
+    )
+    test_result = await test_provider_connection(
+        provider=selected,
+        settings=request_config,
+        api_key=api_key_override,
+        base_url=x_ollama_base_url,
+        model=x_ollama_model,
+    )
+
+    data = test_result.model_dump()
+    data["ok"] = test_result.usable
+    data["answer"] = (test_result.details or {}).get("sample_reply", "OK")
+    if not test_result.usable:
+        error_msg = test_result.error_message or "Connection failed"
+        err_code = test_result.error_code.value if test_result.error_code else "ERROR"
+        data["detail"] = f"[{err_code}] {error_msg}"
+        status_code = 400 if err_code == "CONFIGURATION_ERROR" else 502
+        return JSONResponse(status_code=status_code, content=data)
+    return data
 
 @router.get("/demo/case")
 async def demo_case() -> dict:

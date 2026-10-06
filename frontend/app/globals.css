@@ -205,3 +205,8 @@ button:disabled { cursor: not-allowed; }
 .settings-section-title { font-size: 10px; text-transform: uppercase; letter-spacing: .13em; color: var(--blue); font-weight: 800; }
 .settings-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 19px; }
 .settings-actions button { min-height: 38px; }
+
+.settings-diag { margin: 8px 0 12px; font-size: 11px; line-height: 1.45; padding: 6px 10px; border-radius: 4px; font-family: var(--font-mono, monospace); }
+.settings-diag.pass { background: #eef7ee; color: #1e5a22; border: 1px solid #c7e5c7; }
+.settings-diag.fail { background: #fdf0f0; color: #9c2727; border: 1px solid #f5c2c2; }
+.settings-diag.pending { background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; }

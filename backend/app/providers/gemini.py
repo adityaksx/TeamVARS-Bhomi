@@ -1,6 +1,5 @@
-import base64
-
 from .base import AIProvider, AIResult
+from .connections.gemini import GeminiConnection
 
 
 class GeminiProvider(AIProvider):
@@ -11,48 +10,17 @@ class GeminiProvider(AIProvider):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
+        self.connection = GeminiConnection(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            timeout=timeout,
+        )
 
     async def chat(self, system: str, user: str) -> AIResult:
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": f"SYSTEM INSTRUCTIONS:\n{system}\n\nUSER:\n{user}"}]}],
-            "generationConfig": {"temperature": 0.2},
-        }
-        return await self._generate(payload)
+        result = await self.connection.chat(system, user)
+        return AIResult(provider=self.name, model=result.model, text=result.text)
 
     async def extract_pdf(self, content: bytes, mime_type: str, prompt: str) -> AIResult:
-        payload = {
-            "contents": [{
-                "role": "user",
-                "parts": [
-                    {"text": prompt},
-                    {"inlineData": {"mimeType": mime_type, "data": base64.b64encode(content).decode("ascii")}},
-                ],
-            }],
-            "generationConfig": {
-                "temperature": 0.1,
-                "responseMimeType": "application/json",
-            },
-        }
-        return await self._generate(payload)
-
-    async def _generate(self, payload: dict) -> AIResult:
-        import httpx
-
-        url = f"{self.base_url}/models/{self.model}:generateContent"
-        headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(url, json=payload, headers=headers)
-            if response.status_code >= 400:
-                raise RuntimeError(
-                    f"Gemini request failed ({response.status_code}): {response.text[:2000]}"
-                )
-            data = response.json()
-
-        candidates = data.get("candidates") or []
-        if not candidates:
-            raise RuntimeError(f"Gemini returned no candidates: {data!r}")
-        parts = ((candidates[0].get("content") or {}).get("parts") or [])
-        text = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
-        if not text:
-            raise RuntimeError(f"Gemini returned an empty response: {data!r}")
-        return AIResult(provider=self.name, model=self.model, text=text)
+        result = await self.connection.extract_pdf(content, mime_type, prompt)
+        return AIResult(provider=self.name, model=result.model, text=result.text)
