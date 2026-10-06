@@ -116,7 +116,9 @@ export default function BhoomiConsole() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiKeys, setApiKeys] = useState({ sarvam: "", gemini: "", grok: "" });
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState("http://localhost:11434/v1");
-  const [ollamaModel, setOllamaModel] = useState("qwen2.5:7b-instruct");
+  const [ollamaModel, setOllamaModel] = useState("qwen3:8b");
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [providerTest, setProviderTest] = useState<Record<string, string>>({});
   const [activeFinding, setActiveFinding] = useState("F-001");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
@@ -136,10 +138,34 @@ export default function BhoomiConsole() {
     try {
       setApiKeys({ sarvam: localStorage.getItem("bhoomilens_sarvam_key") ?? "", gemini: localStorage.getItem("bhoomilens_gemini_key") ?? "", grok: localStorage.getItem("bhoomilens_grok_key") ?? "" });
       setOllamaBaseUrl(localStorage.getItem("bhoomilens_ollama_url") ?? "http://localhost:11434/v1");
-      setOllamaModel(localStorage.getItem("bhoomilens_ollama_model") ?? "qwen2.5:7b-instruct");
+      setOllamaModel(localStorage.getItem("bhoomilens_ollama_model") ?? "qwen3:8b");
     } catch {}
   }, []);
 
+  async function refreshOllamaModels() {
+    try {
+      const body = await jsonFetch("/ollama/models", { headers: { "X-Ollama-Base-Url": ollamaBaseUrl } });
+      const names = (body.models ?? []).map((item: { name?: string }) => item.name).filter(Boolean) as string[];
+      setOllamaModels(names);
+      if (names.length && !names.includes(ollamaModel)) {
+        const preferred = names.find((name) => name === "qwen3:8b") ?? names.find((name) => name === "qwen3-vl:4b") ?? names[0];
+        setOllamaModel(preferred);
+      }
+      setProviderTest((state) => ({ ...state, ollama: `${names.length} local model${names.length === 1 ? "" : "s"} found` }));
+    } catch (error) {
+      setProviderTest((state) => ({ ...state, ollama: error instanceof Error ? error.message : "Ollama is unreachable" }));
+    }
+  }
+
+  async function testProviderConnection(id: "sarvam" | "gemini" | "grok" | "ollama") {
+    setProviderTest((state) => ({ ...state, [id]: "Testing…" }));
+    try {
+      const body = await jsonFetch(`/provider/test?provider=${id}`, { method: "POST", headers: requestHeaders() });
+      setProviderTest((state) => ({ ...state, [id]: `Connected · ${body.model}` }));
+    } catch (error) {
+      setProviderTest((state) => ({ ...state, [id]: error instanceof Error ? error.message : "Connection failed" }));
+    }
+  }
   function saveSettings() {
     localStorage.setItem("bhoomilens_sarvam_key", apiKeys.sarvam); localStorage.setItem("bhoomilens_gemini_key", apiKeys.gemini); localStorage.setItem("bhoomilens_grok_key", apiKeys.grok);
     localStorage.setItem("bhoomilens_ollama_url", ollamaBaseUrl); localStorage.setItem("bhoomilens_ollama_model", ollamaModel);
@@ -173,6 +199,10 @@ export default function BhoomiConsole() {
     if (id === "ollama" || id === "local") return Boolean(ollamaBaseUrl && ollamaModel);
     return false;
   }
+
+  useEffect(() => {
+    if (ollamaBaseUrl) refreshOllamaModels();
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -867,12 +897,22 @@ export default function BhoomiConsole() {
             </div>
             <p className="settings-note">Keys are stored in this browser and sent to the backend only when that provider is used.</p>
             <ProviderKey label="Sarvam AI API key" value={apiKeys.sarvam} onChange={(value) => setApiKeys((state) => ({ ...state, sarvam: value }))} />
+            <button className="ghost-button" type="button" onClick={() => testProviderConnection("sarvam")}>Test Sarvam</button>
+            {providerTest.sarvam && <div className="settings-note">{providerTest.sarvam}</div>}
             <ProviderKey label="Gemini API key" value={apiKeys.gemini} onChange={(value) => setApiKeys((state) => ({ ...state, gemini: value }))} />
+            <button className="ghost-button" type="button" onClick={() => testProviderConnection("gemini")}>Test Gemini</button>
+            {providerTest.gemini && <div className="settings-note">{providerTest.gemini}</div>}
             <ProviderKey label="Grok API key" value={apiKeys.grok} onChange={(value) => setApiKeys((state) => ({ ...state, grok: value }))} />
             <div className="settings-divider" />
             <div className="settings-section-title">Ollama Local</div>
             <label className="settings-field"><span>Base URL</span><input value={ollamaBaseUrl} onChange={(e) => setOllamaBaseUrl(e.target.value)} placeholder="http://localhost:11434/v1" /></label>
-            <label className="settings-field"><span>Model</span><input value={ollamaModel} onChange={(e) => setOllamaModel(e.target.value)} placeholder="qwen2.5:7b-instruct" /></label>
+            <div className="settings-actions"><button className="ghost-button" type="button" onClick={refreshOllamaModels}>Refresh models</button><button className="ghost-button" type="button" onClick={() => testProviderConnection("ollama")}>Test Ollama</button></div>
+            {ollamaModels.length > 0 ? (
+              <label className="settings-field"><span>Model</span><select value={ollamaModel} onChange={(e) => setOllamaModel(e.target.value)}>{ollamaModels.map((name) => <option key={name}>{name}</option>)}</select></label>
+            ) : (
+              <label className="settings-field"><span>Model</span><input value={ollamaModel} onChange={(e) => setOllamaModel(e.target.value)} placeholder="qwen3:8b" /></label>
+            )}
+            {providerTest.ollama && <div className="settings-note">{providerTest.ollama}</div>}
             <div className="settings-actions"><button className="ghost-button" onClick={() => setSettingsOpen(false)}>Cancel</button><button className="primary-button" onClick={saveSettings}>Save settings</button></div>
           </section>
         </div>
