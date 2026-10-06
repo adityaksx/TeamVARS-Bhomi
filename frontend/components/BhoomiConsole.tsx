@@ -202,7 +202,7 @@ export default function BhoomiConsole() {
 
   useEffect(() => {
     if (ollamaBaseUrl) refreshOllamaModels();
-  }, []);
+  }, [ollamaBaseUrl]);
 
   useEffect(() => {
     Promise.all([
