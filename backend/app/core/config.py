@@ -18,14 +18,14 @@ class Settings(BaseSettings):
 
     gemini_api_key: str | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
 
     grok_api_key: str | None = None
     grok_base_url: str = "https://api.x.ai/v1"
     grok_model: str = "grok-4.7"
 
     ollama_base_url: str = "http://localhost:11434/v1"
-    ollama_model: str = "qwen2.5:7b-instruct"
+    ollama_model: str = "qwen3:8b"
 
     openmodel_api_key: str | None = None
     openmodel_base_url: str = "https://api.openmodel.ai"
