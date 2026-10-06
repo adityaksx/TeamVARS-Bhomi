@@ -81,6 +81,59 @@ async def config() -> dict:
         ],
     }
 
+@router.get("/ollama/models")
+async def ollama_models(
+    x_ollama_base_url: str | None = Header(default=None, alias="X-Ollama-Base-Url"),
+) -> dict:
+    base_url = (x_ollama_base_url or settings.ollama_base_url).rstrip("/")
+    if base_url.endswith("/v1"):
+        base_url = base_url[:-3]
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(f"{base_url}/api/tags")
+            response.raise_for_status()
+            payload = response.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Ollama model discovery failed: {exc}") from exc
+
+    models = []
+    for item in payload.get("models", []):
+        details = item.get("details") or {}
+        capabilities = item.get("capabilities", [])
+        models.append({
+            "name": item.get("name") or item.get("model"),
+            "size": item.get("size"),
+            "parameter_size": details.get("parameter_size"),
+            "quantization": details.get("quantization_level"),
+            "capabilities": capabilities,
+            "vision": "vision" in capabilities,
+            "thinking": "thinking" in capabilities,
+            "tools": "tools" in capabilities,
+        })
+    return {"base_url": base_url, "models": models}
+
+@router.post("/provider/test")
+async def provider_test(
+    provider: str,
+    x_sarvam_api_key: str | None = Header(default=None, alias="X-Sarvam-Api-Key"),
+    x_gemini_api_key: str | None = Header(default=None, alias="X-Gemini-Api-Key"),
+    x_grok_api_key: str | None = Header(default=None, alias="X-Grok-Api-Key"),
+    x_ollama_base_url: str | None = Header(default=None, alias="X-Ollama-Base-Url"),
+    x_ollama_model: str | None = Header(default=None, alias="X-Ollama-Model"),
+) -> dict:
+    if provider not in {"sarvam", "gemini", "grok", "ollama", "local"}:
+        raise HTTPException(status_code=400, detail="Unsupported provider connectivity test")
+    request_config = request_settings(x_sarvam_api_key, x_gemini_api_key, x_grok_api_key, x_ollama_base_url, x_ollama_model)
+    selected = "ollama" if provider == "local" else provider
+    try:
+        ai_provider = get_provider(request_config, selected)
+        result = await ai_provider.chat(system="Reply with exactly: OK", user="Connectivity test. Reply with exactly: OK")
+        return {"ok": True, "provider": result.provider, "model": result.model, "answer": result.text}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"{selected} connectivity test failed: {exc}") from exc
+
 @router.get("/demo/case")
 async def demo_case() -> dict:
     return build_demo_dashboard()
