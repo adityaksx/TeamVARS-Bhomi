@@ -19,7 +19,8 @@ class SarvamProvider(AIProvider):
                 {"role": "user", "content": user},
             ],
             "temperature": 0.2,
-            "max_tokens": 1800,
+            "max_tokens": 2048,
+            "reasoning_effort": "low",
         }
         headers = {
             "api-subscription-key": self.api_key,
