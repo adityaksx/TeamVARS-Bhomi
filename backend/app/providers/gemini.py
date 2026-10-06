@@ -38,9 +38,10 @@ class GeminiProvider(AIProvider):
     async def _generate(self, payload: dict) -> AIResult:
         import httpx
 
-        url = f"{self.base_url}/models/{self.model}:generateContent?key={self.api_key}"
+        url = f"{self.base_url}/models/{self.model}:generateContent"
+        headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(url, json=payload)
+            response = await client.post(url, json=payload, headers=headers)
             if response.status_code >= 400:
                 raise RuntimeError(
                     f"Gemini request failed ({response.status_code}): {response.text[:2000]}"
