@@ -1,1017 +1,665 @@
-# BhoomiLens AI Provider Connection — Antigravity Debug & Fix Plan
+# BhoomiLens — Mandatory Sarvam Document Extraction Fix
 
-## Mission
+## Objective
 
-Fix the AI-provider connection layer of TeamVARS-Bhomi / BhoomiLens for three providers:
+Fix the document-analysis pipeline so that Sarvam Document AI is always attempted first for document extraction whenever a Sarvam API key is configured, regardless of the selected reasoning provider.
 
-1. Sarvam AI — user-supplied free API key
-2. Google Gemini API — user-supplied free API key
-3. Local Ollama — RTX 3050 6 GB
+The selected reasoning provider (ollama, gemini, grok, sarvam, etc.) must NOT decide which provider performs document extraction.
 
-Current symptom: Sarvam does not connect, Gemini does not connect, and Ollama works but is too slow.
+Required behavior:
 
-The first goal is **diagnostic certainty**. Do not debug the full document pipeline until each provider has passed a minimal standalone request.
+Uploaded PDF
+ -> Native PDF text extraction
+ -> Sarvam Document AI extraction FIRST
+ -> SUCCESS: structured extraction
+ -> FAIL: AI vision/OCR fallback (Ollama / Gemini / configured AI)
 
----
+For this requirement:
+1. Sarvam must be attempted first for extraction if SARVAM_API_KEY exists.
+2. reasoning_provider=ollama must only select the reasoning/explanation model.
+3. If Sarvam extraction fails, log the exact reason and then use AI vision/OCR.
+4. If Sarvam succeeds, Ollama/Gemini must NOT redundantly re-extract the same document.
+5. Test with the actual Udran_Khatoni.pdf scanned PDF.
+6. Antigravity must run backend tests and an end-to-end document analysis before completion.
 
-## 1. Current environment
+## 1. Root Cause Found in Current Repository
 
-Installed Ollama models:
+Repository: adityaksx/TeamVARS-Bhomi
 
-| Model | Size | Quantization | Role |
-|---|---:|---|---|
-| qwen3:8b | ~5.2 GB | Q4_K_M | Primary text/reasoning |
-| deepseek-r1:8b | ~5.2 GB | Q4_K_M | Deep reasoning; slower |
-| qwen3-vl:4b | ~3.3 GB | Q4_K_M | Vision/scanned documents/OCR |
-| gemma3:4b | ~3.3 GB | Q4_K_M | Lightweight fallback |
+Relevant files:
+- backend/app/services/pipeline.py
+- backend/app/services/fallback_extraction.py
+- backend/app/core/config.py
+- backend/tests/test_document_pipeline_failures.py
+- backend/tests/test_digitise_and_reporting.py
 
-Hardware: NVIDIA RTX 3050 Laptop GPU, 6 GB VRAM, Fedora Linux, Ollama installed.
+### Root cause A — reasoning provider incorrectly controls extraction
 
-Do not assume that an installed model is actually using the GPU efficiently.
+Current pipeline logic effectively does:
 
----
+    extraction_provider = reasoning_provider
 
-## 2. Free-key requirement
+    if sarvam_api_key and extraction_provider in {"auto", "fallback", "sarvam"}:
+        # Sarvam extraction
 
-The user has **free API keys, not paid accounts**.
+When the frontend calls:
 
-Every diagnostic must distinguish:
+    POST /api/cases/{case_id}/analyze?reasoning_provider=ollama
 
-- missing key
-- malformed key
-- invalid key
-- valid key but model unavailable
-- free-tier quota exhausted
-- rate limited
-- billing/account restriction
-- endpoint/model mismatch
-- malformed request
-- timeout/network error
-- provider 5xx
-- application-side parsing/integration bug
+extraction_provider becomes ollama, so the Sarvam condition is false.
 
-Do not label every 401/403/429 as an invalid key.
+The observed log proves this:
 
-Google's current documentation states that the free tier has limited model access, so the implementation must verify that the selected model is actually available to the supplied key/project.
+    stage=ocr_fallback
+    Attempting Ollama vision extraction with model 'qwen3-vl:4b'
 
-Sarvam requires an API subscription key and currently documents both the api-subscription-key header and Bearer authentication.
+No Sarvam submission appears immediately before it.
 
----
+### Required fix
 
-## 3. Official references
+Create two independent concepts:
 
-Sarvam:
-- Authentication: https://docs.sarvam.ai/api-reference/authentication
-- Chat V1: https://docs.sarvam.ai/api-reference/chat/chat-completions-v1
-- Chat V2: https://docs.sarvam.ai/api-reference/chat/chat-completions-v2
-- Quickstart: https://docs.sarvam.ai/api/getting-started/quickstart
-- Chat overview: https://docs.sarvam.ai/api/api-guides-tutorials/chat-completion/overview
-
-Gemini:
-- API docs: https://ai.google.dev/gemini-api/docs
-- API keys: https://ai.google.dev/gemini-api/docs/api-key
-- Gemini 3: https://ai.google.dev/gemini-api/docs/gemini-3
-- Pricing/free tier: https://ai.google.dev/gemini-api/docs/pricing
-
-Ollama:
-- API: https://docs.ollama.com/api
-- OpenAI compatibility: https://docs.ollama.com/openai
-
-Do not copy old provider code from random repositories when the official API has changed.
-
----
-
-## 4. Repository audit
-
-Before editing, inspect:
-
-~~~
-backend/app/providers/
-backend/app/api/routes.py
-frontend/components/BhoomiConsole.tsx
-frontend/
-backend/
-requirements.txt
-pyproject.toml
-package.json
-.env*
-~~~
-
-Search for:
-
-~~~
-Sarvam
-sarvam
-Gemini
-gemini
-Ollama
-ollama
-X-Sarvam-Api-Key
-X-Gemini-Api-Key
-X-Ollama-Base-Url
-X-Ollama-Model
-/provider/test
-/ollama/models
-google-genai
-sarvamai
-~~~
-
-Inspect the current implementation rather than assuming it matches this plan.
-
-Do not rewrite unrelated application code.
-
----
-
-## 5. Debug architecture
-
-Use this flow:
-
-~~~
-Frontend Settings
-      |
-      v
-POST /provider/test
-      |
-      v
-Standalone provider adapter
-      |
-      +--> Sarvam
-      +--> Gemini
-      +--> Ollama
-      |
-      v
-Normalized ProviderTestResult
-      |
-      v
-Frontend diagnostic status
-~~~
-
-Production calls should eventually reuse the same provider adapters.
-
-The testing path must not execute the complete PDF/OCR/reasoning pipeline.
-
----
-
-## 6. Create isolated provider connection modules
-
-If an equivalent abstraction already exists, extend it.
-
-Recommended structure:
-
-~~~
-backend/
-  app/
-    providers/
-      connections/
-        __init__.py
-        base.py
-        models.py
-        errors.py
-        sarvam.py
-        gemini.py
-        ollama.py
-        runner.py
-  scripts/
-    test_ai_connections.py
-  tests/
-    provider_connections/
-      test_models.py
-      test_sarvam.py
-      test_gemini.py
-      test_ollama.py
-      test_runner.py
-~~~
-
----
-
-## 7. Normalized result contract
-
-All providers should return the same structure.
-
-Example fields:
-
-~~~
-provider
-configured
-connected
-usable
-model
-http_status
-latency_ms
-attempts
-retryable
-error_code
-error_message
-raw_provider_status
-~~~
-
-Recommended error codes:
-
-~~~
-CONFIGURATION_ERROR
-AUTHENTICATION_ERROR
-AUTHORIZATION_ERROR
-MODEL_NOT_AVAILABLE
-INVALID_REQUEST
-QUOTA_EXCEEDED
-RATE_LIMITED
-TIMEOUT
-NETWORK_ERROR
-PROVIDER_SERVER_ERROR
-RESPONSE_PARSE_ERROR
-OLLAMA_UNAVAILABLE
-OLLAMA_MODEL_NOT_FOUND
-UNKNOWN_PROVIDER_ERROR
-~~~
-
-Never return or log API keys.
-
----
-
-## 8. Credential handling
-
-Support environment variables for CLI diagnostics:
-
-~~~
-SARVAM_API_KEY=
-GEMINI_API_KEY=
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=
-~~~
-
-The web UI must accept runtime keys.
-
-Rules:
-
-1. Do not persist raw API keys.
-2. Do not put keys in database records.
-3. Do not return keys to the frontend.
-4. Do not print keys in logs.
-5. Redact Authorization and API-key headers.
-6. Do not commit .env secrets.
-7. Prefer an interactive getpass prompt for local CLI tests.
-8. Runtime browser keys may be forwarded only for the requested provider call.
-
----
-
-# 9. Sarvam standalone connection test
-
-First prove Sarvam chat connectivity. Do **not** start with Document AI.
-
-Sarvam's current V1 chat endpoint documents sarvam-105b and sarvam-105b-conversations. Verify the exact model and endpoint from the current official documentation before making the request.
-
-Minimal request:
-
-~~~
-user: Reply exactly: OK
-~~~
-
-No PDF, OCR, tools, huge context, or document text.
-
-### Test matrix
-
-S1. Missing key -> CONFIGURATION_ERROR
-
-S2. Deliberately fake key -> AUTHENTICATION_ERROR
-
-S3. Real free key -> minimal chat response
-
-S4. Verify model is accessible to this account
-
-S5. 429 -> RATE_LIMITED / QUOTA_EXCEEDED as appropriate
-
-S6. Timeout -> TIMEOUT
-
-S7. 5xx -> PROVIDER_SERVER_ERROR and bounded retry
-
-S8. Successful response -> verify response parser extracts assistant text
-
-Do not infer authentication failure from a generic exception.
-
----
-
-## 10. Sarvam REST vs official SDK
-
-Sarvam's official Python SDK is sarvamai.
-
-If practical, test both:
-
-1. direct documented REST call
-2. official SDK call
-
-Interpretation:
-
-| REST | SDK | Diagnosis |
-|---|---|---|
-| pass | pass | provider/key works |
-| fail | fail | provider/account/model/request issue |
-| pass | fail | SDK integration issue |
-| fail | pass | custom REST adapter issue |
-
-Use the official docs as the primary contract.
-
----
-
-## 11. Sarvam Document AI is separate
-
-A previous BhoomiLens error was:
-
-~~~
-CLASSIFICATION_NOT_SUPPORTED:
-classification is not supported on extract yet
-~~~
-
-Treat this as a possible **Document AI request/capability issue**, not proof that the API key is bad.
-
-Test in this order:
-
-~~~
-Sarvam key
-  -> minimal chat
-  -> success
-  -> Document AI test
-~~~
-
-For Document AI, verify current endpoint, supported parameters, job creation, polling/status flow, document type, and current capabilities from the official docs.
-
----
-
-# 12. Gemini standalone connection test
-
-Use Google's current official Gemini API/SDK.
-
-The official Python package is google-genai.
-
-Do not hardcode a model from an old tutorial.
-
-First determine which current models are actually available to the supplied API key/project and free tier. Then run the smallest generation request.
-
-Prompt:
-
-~~~
-Reply exactly: OK
-~~~
-
-Do not initially use:
-- PDFs
-- image input
-- web search
-- tools
-- large system prompts
-- structured output
-- long context
-
-This isolates authentication and basic generation.
-
----
-
-## 13. Gemini test matrix
-
-G1. Missing key -> CONFIGURATION_ERROR
-
-G2. Fake key -> AUTHENTICATION_ERROR
-
-G3. Real free key + verified free-tier model -> success
-
-G4. Model unavailable -> MODEL_NOT_AVAILABLE
-
-G5. Free quota exhausted -> QUOTA_EXCEEDED
-
-G6. 429 -> RATE_LIMITED
-
-G7. 5xx -> bounded retry
-
-G8. Timeout -> TIMEOUT
-
-G9. Successful response -> parser extracts generated text
-
-Do not report "invalid API key" if the real cause is model access or quota.
-
----
-
-## 14. Gemini API-key audit
-
-If Gemini fails:
-
-1. Verify the key is actually supplied to the backend.
-2. Verify the key is not being overwritten by an empty environment variable.
-3. Verify the project associated with the key.
-4. Verify the key's restrictions.
-5. Verify the selected model is accessible.
-6. Capture sanitized HTTP status and provider response.
-7. Check whether the failure is quota/rate-limit/billing related.
-8. Test the same key outside BhoomiLens using the official SDK or documented REST request.
-
-The external direct test is mandatory before declaring the BhoomiLens adapter broken.
-
----
-
-# 15. Ollama standalone tests
-
-Test Ollama without BhoomiLens.
-
-### O1 — service
-
-~~~
-curl http://127.0.0.1:11434/api/tags
-~~~
-
-Expected: JSON with installed models.
-
-### O2 — native chat
-
-Use the native /api/chat endpoint with:
-
-~~~
-Reply exactly: OK
-~~~
-
-### O3 — OpenAI-compatible API
-
-Test /v1/chat/completions only if the application uses this interface.
-
-Compare native and OpenAI-compatible behavior.
-
----
-
-# 16. Ollama performance benchmark
-
-Run each installed model at least three times:
-
-~~~
-Run 1 = cold
-Run 2 = warm
-Run 3 = warm
-~~~
-
-Collect:
-
-- model load time
-- first-token latency
-- total latency
-- generated tokens
-- tokens/sec
-- CPU usage
-- RAM
-- GPU utilization
-- VRAM
-- prompt/context size
-
-While generating, inspect:
-
-~~~
-ollama ps
-nvidia-smi
-~~~
-
-Do not change models before collecting these measurements.
-
----
-
-# 17. Ollama routing
-
-Initial candidate roles:
-
-~~~
-qwen3:8b      -> primary text/reasoning
-deepseek-r1:8b -> complex reasoning only
-qwen3-vl:4b   -> vision/scanned documents
-gemma3:4b     -> lightweight fallback
-~~~
-
-Do not load several large models concurrently unless necessary.
-
-For the 6 GB GPU, benchmark whether qwen3:8b actually fits and runs efficiently. If it is CPU-bound or suffers heavy memory pressure, test qwen3-vl:4b/gemma3:4b for appropriate tasks.
-
----
-
-# 18. Diagnose why Ollama is slow
-
-Classify the result:
-
-### GPU high + VRAM high
-Likely GPU/memory bottleneck.
-
-### GPU low + CPU high
-Investigate GPU offload/runtime configuration.
-
-### First request slow, later requests fast
-Model cold-start/loading overhead.
-
-### All requests slow
-Model/runtime/context problem.
-
-### Tiny prompt fast, BhoomiLens prompt slow
-Application is sending too much context or duplicate text.
-
-Measure prompt size before changing architecture.
-
----
-
-# 19. Context audit
-
-Search for:
-
-~~~
-messages
-system_prompt
-document_text
-extracted_text
-chat_history
-max_tokens
-context
-~~~
-
-Record actual input size for each provider.
-
-Look for:
-
-- duplicate OCR
-- duplicate document pages
-- entire chat history being resent
-- irrelevant metadata
-- huge JSON blobs
-- unnecessary system prompts
-
-Do not blame Ollama for application-generated context bloat.
-
----
-
-# 20. Retry policy
-
-Retry only transient conditions:
-
-~~~
-408
-429
-500
-502
-503
-504
-temporary connection reset/network failure
-~~~
-
-Maximum: **3 total attempts**.
-
-Use exponential backoff with jitter and honor Retry-After when provided.
-
-Do NOT retry:
-
-~~~
-400
-401
-403
-404
-invalid request
-invalid model
-unsupported feature
-~~~
-
-Never run infinite retry loops.
-
-Do not repeatedly retry an invalid free API key.
-
----
-
-# 21. Repeated diagnostic mode
-
-The user wants to test providers repeatedly.
-
-Create:
-
-~~~
-python backend/scripts/test_ai_connections.py --provider gemini --repeat 3
-~~~
-
-Allowed repeat range: 1 to 5.
+    reasoning_provider
+    extraction_provider
 
 Example:
 
-~~~
-Test 1/3: PASS 842 ms
-Test 2/3: PASS 511 ms
-Test 3/3: PASS 496 ms
+    reasoning_provider = "ollama"
+    extraction_provider = "sarvam"
 
-Success rate: 100%
-Median latency: 511 ms
-~~~
+The UI may choose Ollama/Gemini/etc. for reasoning, while extraction follows the mandatory Sarvam-first policy.
 
-If the first attempt produces a non-retryable authentication/model error, stop instead of wasting quota.
+## 2. Root Cause B — fallback_extraction.py bypasses Sarvam
 
----
+backend/app/services/fallback_extraction.py currently handles scanned PDFs approximately as:
 
-# 22. CLI commands
+    no native text
+     -> Gemini vision
+     -> Ollama vision
+     -> fail
 
-Support:
+There is no Sarvam Document AI call in this function.
 
-~~~
-python backend/scripts/test_ai_connections.py --provider sarvam
-python backend/scripts/test_ai_connections.py --provider gemini
-python backend/scripts/test_ai_connections.py --provider ollama
-python backend/scripts/test_ai_connections.py --provider all
-python backend/scripts/test_ai_connections.py --provider ollama --model qwen3:8b
-python backend/scripts/test_ai_connections.py --provider gemini --repeat 3
-~~~
+Therefore any path entering extract_with_fallback() can bypass Sarvam.
 
-CLI output must contain:
+### Required fix
 
-- provider
-- endpoint
-- model
-- attempt
-- latency
-- HTTP status
-- normalized error
-- sanitized provider message
+Do not make fallback_extraction.py silently choose Sarvam independently if the main pipeline owns the Sarvam job lifecycle.
 
-Never print API keys.
+Centralize the extraction policy so there is exactly one authoritative extraction path.
 
----
+Preferred design:
 
-# 23. Backend test endpoint
+    pipeline.py
+       |
+       +--> native text detection
+       |
+       +--> mandatory Sarvam extraction
+       |
+       +--> AI vision fallback only after Sarvam failure
 
-Keep/use:
+fallback_extraction.py should remain responsible for AI/OCR fallback providers, not silently override the mandatory Sarvam-first policy.
 
-~~~
-POST /provider/test
-~~~
+If reusable Sarvam code is needed, move _submit_sarvam, _poll_sarvam and result parsing into backend/app/services/sarvam_document_ai.py.
 
-For Sarvam/Gemini:
+## 3. Required Provider Policy
 
-~~~
-{
-  "provider": "gemini",
-  "model": "optional",
-  "api_key": "runtime-only"
-}
-~~~
+### Sarvam API key exists
 
-For Ollama:
+    SARVAM_API_KEY configured
+          |
+          v
+    Sarvam Document AI MUST be attempted
+          |
+          +--> success -> use Sarvam result
+          |
+          +--> failure -> AI fallback
 
-~~~
-{
-  "provider": "ollama",
-  "base_url": "http://127.0.0.1:11434",
-  "model": "qwen3:8b"
-}
-~~~
+Selected reasoning provider must not change this.
 
-Never persist the key.
-
-Keep/use:
-
-~~~
-GET /ollama/models
-~~~
-
-This endpoint should dynamically query Ollama rather than hardcode model names.
-
----
-
-# 24. Frontend provider status
-
-Do not display only "Connected / Disconnected".
-
-Use actionable states:
-
-| State | Meaning |
+| reasoning_provider | extraction order |
 |---|---|
-| Not configured | No key/model |
-| Testing | Request in progress |
-| Connected | Minimal request succeeded |
-| Model unavailable | Key works, selected model does not |
-| Authentication failed | Key rejected |
-| Rate limited | 429 |
-| Quota exhausted | Free quota unavailable |
-| Provider error | 5xx/other provider failure |
-| Timeout | Request timed out |
-| Local unavailable | Ollama unreachable |
-| Local slow | Ollama works but benchmark is slow |
+| ollama | Sarvam -> Ollama/Gemini fallback |
+| gemini | Sarvam -> Gemini/Ollama fallback |
+| grok | Sarvam -> Grok/other configured fallback |
+| sarvam | Sarvam -> configured fallback |
+| auto | Sarvam -> configured fallback |
+| mock | preserve explicit mock/test behavior |
 
-The UI should show the normalized diagnosis and latency.
+### No Sarvam API key
 
----
+Use the existing AI/OCR fallback chain.
 
-# 25. Production adapter architecture
+Do not claim Sarvam was attempted when no key exists.
 
-Production code should reuse the same adapters used by the test endpoint.
+## 4. Separate Extraction From Reasoning
 
-Target:
+Refactor analyze_case() so reasoning_provider is used only for downstream reasoning/explanation.
 
-~~~
-ProviderConnection
-   |
-   +-- test_connection()
-   |
-   +-- generate()
-~~~
+Add an extraction policy equivalent to:
 
-Avoid having one HTTP implementation for testing and a completely separate implementation for production.
+    def resolve_extraction_provider(settings):
+        if settings.sarvam_api_key:
+            return "sarvam"
+        return "fallback"
 
-This prevents the common situation where the "Test" button passes but the real BhoomiLens pipeline still fails.
+Do not derive extraction provider from reasoning_provider.
 
----
+## 5. Preserve Existing Sarvam Document AI Implementation
 
-# 26. Full pipeline only after standalone tests pass
+The repository already has:
+- _submit_sarvam()
+- _poll_sarvam()
+- _extract_result()
+- Sarvam extraction schema
+- chunked PDF handling
+- optional Sarvam Digitise support
+- source-page handling
 
-Once provider tests pass:
+Do not rewrite these blindly. First make them the mandatory first extraction path.
 
-~~~
-Frontend
- -> /provider/test
- -> adapter
- -> provider
- -> normalized result
-~~~
+Existing flow:
 
-Then test:
+    PDF
+     -> split_pdf()
+     -> /doc-ai/v1/job/extract
+     -> job_id
+     -> /status
+     -> /results?format=json
+     -> structured result
 
-~~~
-/chat
-/explain
-/document extraction
-/document reasoning
-~~~
+Keep this architecture unless current API behavior requires a targeted correction.
 
-Run one small synthetic document first.
+## 6. Important Sarvam API Error Handling
 
-Measure:
+A previous BhoomiLens error was:
 
-1. upload
-2. preprocessing
-3. OCR
-4. extraction
-5. reasoning
-6. number of provider calls
-7. fallback calls
-8. total latency
-9. final response
+    CLASSIFICATION_NOT_SUPPORTED:
+    classification is not supported on extract yet
 
----
+Do NOT interpret this as an invalid API key.
 
-# 27. Fallback rules
+It is a request/capability/API-contract problem.
 
-Fallback must be error-aware.
+The current extraction request includes:
 
-### Invalid API key
-Do not repeatedly retry the same provider.
+    form = {
+        "schema": EXTRACTION_SCHEMA,
+        "language": settings.sarvam_document_language,
+        "output_format": "json",
+    }
 
-### Model unavailable
-Try another configured provider/model.
+Verify the current Sarvam Document AI Extract API contract before changing this.
 
-### 429
-Bounded retry, then fallback.
+If classification is being injected indirectly by the request/schema, remove only the unsupported classification behavior. Do not remove structured extraction itself.
 
-### Quota exhausted
-Fallback to another configured provider.
+## 7. Sarvam Extraction Must Work for Scanned PDFs
 
-### Ollama unavailable
-Use external provider if configured.
+The test document is Udran_Khatoni.pdf, a 3-page scanned/image PDF.
 
-### Ollama slow
-Do not automatically call it multiple times.
+Expected flow:
 
----
+    Udran_Khatoni.pdf
+        |
+        v
+    native PyMuPDF text extraction
+        |
+        v
+    0 usable characters
+        |
+        v
+    stage = sarvam_extraction
+        |
+        v
+    Sarvam Document AI
+        |
+        v
+    structured JSON
+        |
+        v
+    normalization
+        |
+        v
+    reconciliation
 
-# 28. Vision/OCR routing
+It must NOT immediately become:
 
-For scanned land records:
+    stage = ocr_fallback
+        |
+        v
+    Ollama qwen3-vl:4b
 
-~~~
-PDF
- -> page rendering
- -> image preprocessing
- -> qwen3-vl:4b or external vision model
- -> structured extraction
- -> document-level reasoning
-~~~
+unless Sarvam actually failed.
 
-Do not send an entire multi-page high-resolution PDF as one huge prompt.
+## 8. Required Logging
 
-Page-level processing makes performance and failures easier to diagnose.
+Add unambiguous logs.
 
----
+Before Sarvam:
+    stage=sarvam_extraction
+    Starting mandatory Sarvam Document AI extraction for <filename>
 
-# 29. Security requirements
+Job creation:
+    Sarvam Document AI job submitted: document=<id> job_id=<id>
 
-Never log:
+Polling:
+    Sarvam Document AI job status: job_id=<id> status=<status>
 
-- API keys
-- Authorization headers
-- uploaded document contents
-- base64 images
-- full private OCR text
+Success:
+    Sarvam Document AI extraction succeeded: document=<id> job_id=<id> pages=<count>
 
-Log only safe metadata:
+Failure:
+    Sarvam Document AI extraction failed: document=<id> status=<http status> error_code=<normalized code> message=<sanitized message>
 
-~~~
-provider
-model
-endpoint
-latency
-status
-error code
-file name
-MIME type
-file size
-page count
-~~~
+Fallback:
+    Sarvam extraction failed; entering AI vision/OCR fallback provider=<provider>
 
-If request/response debugging is needed, redact secrets and truncate document text.
+Never log API keys, Authorization headers, base64 images, or full private OCR output.
 
----
+## 9. Add Explicit Extraction Metadata
 
-# 30. Tests
+Each processed document should retain enough metadata to diagnose what happened.
+
+Recommended fields:
+
+    extraction_provider
+    extraction_attempted_providers
+    extraction_fallback_used
+    extraction_error
+    extraction_job_id
+
+Successful Sarvam example:
+
+    {
+      "extraction_provider": "sarvam",
+      "extraction_attempted_providers": ["sarvam"],
+      "extraction_fallback_used": false,
+      "extraction_job_id": "..."
+    }
+
+Sarvam failure followed by Ollama:
+
+    {
+      "extraction_provider": "ollama",
+      "extraction_attempted_providers": ["sarvam", "ollama"],
+      "extraction_fallback_used": true,
+      "extraction_error": "..."
+    }
+
+Do not replace reasoning_provider with these fields.
+
+## 10. AI Vision Fallback Rules
+
+After Sarvam fails:
+
+For scanned/image-only PDFs, use qwen3-vl:4b when Ollama is configured and selected as the fallback.
+
+Gemini can be used if configured.
+
+Critical rule:
+
+AI vision fallback must never run before the Sarvam attempt when a Sarvam key is configured.
+
+## 11. JSON Robustness
+
+The current Ollama failure was:
+
+    INVALID_JSON_RESPONSE
+    AI extraction did not return JSON:
+    <think>...
+
+This is a second independent issue.
+
+Improve fallback parsing/prompt handling so that:
+1. structured output is requested where supported;
+2. <think>...</think> blocks are removed before JSON parsing;
+3. fenced JSON is handled;
+4. the first valid JSON object is extracted safely;
+5. malformed JSON still produces INVALID_JSON_RESPONSE.
+
+Do not weaken validation so much that arbitrary model prose is accepted as extracted data.
 
 Add unit tests for:
+- <think>...</think>{"document_type":"Khatauni"}
+- fenced JSON
+- plain JSON
+- invalid prose
 
-- credential validation
-- key redaction
-- retry classification
-- error normalization
-- model selection
-- response parsing
-- Ollama discovery
-- timeout handling
-- 401/403
-- 429
-- 5xx
+## 12. Do Not Use Sarvam Digitise as a Substitute for Extract
 
-Mock provider HTTP calls in normal CI.
+SARVAM_DIGITISE_ENABLED is optional and currently defaults to false.
 
-Live tests must be opt-in:
+Digitise is used for source anchors/visual evidence.
 
-~~~
-RUN_LIVE_PROVIDER_TESTS=1 pytest backend/tests/provider_connections
-~~~
+Do not confuse:
+- /doc-ai/v1/job/extract
+- /doc-ai/v1/job/digitise
 
-Never run real API calls automatically in GitHub Actions because the keys may consume free-tier quota.
+Primary extraction must use Sarvam Document AI Extract.
 
----
+Optional evidence/anchor enrichment may use Sarvam Digitise.
 
-# 31. Reference implementations
+## 13. Tests To Add
 
-Inspect these before implementing provider abstraction:
+### Test 1 — reasoning provider must not bypass Sarvam
 
-- Sarvam official Python SDK: sarvamai
-- Google official Python SDK: google-genai
-- PraisonAI: https://github.com/MervinPraison/PraisonAI
-- OmniRoute: https://github.com/diegosouzapw/OmniRoute
+Mock:
+    sarvam_api_key = "test-key"
+    reasoning_provider = "ollama"
 
-Use them for architectural ideas only. Do not add unnecessary dependencies.
+Assert _submit_sarvam() is called before Ollama vision extraction.
 
-Official provider documentation remains the source of truth.
+Assert Ollama is not called if Sarvam succeeds.
 
----
+### Test 2 — Sarvam failure triggers vision fallback
 
-# 32. Execution sequence for Antigravity
+Mock:
+    Sarvam -> raises RuntimeError
+    Ollama vision -> valid JSON
 
-## Step 1 — Audit
-Inspect existing provider/frontend/backend code and report the current data flow.
+Expected:
+    provider = "ollama"
+    fallback_used = True
+    attempts = ["sarvam", "ollama"]
 
-## Step 2 — Normalize
-Create provider result/error models and tests.
+### Test 3 — Sarvam success prevents duplicate AI extraction
 
-## Step 3 — Sarvam
-Implement and run minimal standalone test with the user's real free key.
+Mock Sarvam to return valid structured data and make Ollama fail if called.
 
-## Step 4 — Gemini
-Implement and run minimal standalone test with the user's real free key and a currently accessible free-tier model.
+Expected successful analysis without Ollama.
 
-## Step 5 — Ollama
-Implement direct API test, model discovery, and 3-run performance benchmark.
+### Test 4 — no Sarvam key
 
-## Step 6 — CLI
-Add test_ai_connections.py with bounded repeat mode.
+Mock:
+    sarvam_api_key = None
 
-## Step 7 — Backend
-Connect adapters to /provider/test and /ollama/models.
+Expected existing AI/OCR fallback behavior.
 
-## Step 8 — Frontend
-Connect Settings/Test buttons and actionable statuses.
+### Test 5 — scanned PDF
 
-## Step 9 — Production integration
-Make /chat, /explain and document reasoning reuse the tested adapters.
+Mock:
+    extract_text() -> ""
 
-## Step 10 — Full document test
-Run representative mutation, khatoni, and sale-deed PDFs.
+Assert sarvam_extraction occurs before ocr_fallback.
 
----
+### Test 6 — reasoning provider remains independent
 
-# 33. Verification commands
+Run analysis with reasoning_provider=ollama and reasoning_provider=gemini.
 
-Use the repository's actual commands if they differ.
+With a Sarvam key, both must attempt Sarvam first.
 
-~~~
-pytest
-npm run lint
-npm run build
+### Test 7 — Ollama <think> response
 
-ollama list
-ollama ps
-nvidia-smi
-curl http://127.0.0.1:11434/api/tags
+Input:
+    <think>
+    reasoning
+    </think>
+    {"document_type":"Khatauni"}
 
-python backend/scripts/test_ai_connections.py --provider sarvam
-python backend/scripts/test_ai_connections.py --provider gemini
-python backend/scripts/test_ai_connections.py --provider ollama
-~~~
+Expected parsed object:
+    {"document_type":"Khatauni"}
 
-Do not claim success from frontend build alone.
+## 14. End-to-End Test With Real PDF
 
----
+Antigravity must use the actual project test document:
 
-# 34. Required final diagnostic report
+    Udran_Khatoni.pdf
 
-Antigravity must finish with:
+Run:
+1. Start Ollama.
+2. Start FastAPI.
+3. Ensure Sarvam API key is configured.
+4. Upload Udran_Khatoni.pdf.
+5. Create a case.
+6. Run analysis with reasoning_provider=ollama.
+7. Watch backend logs.
 
-~~~
-PROVIDER CONNECTION REPORT
-==========================
+### Required log order for successful Sarvam
 
-SARVAM
-------
-Key supplied: YES/NO
-Authentication: PASS/FAIL
-Model: <model>
-Model access: PASS/FAIL
-Minimal chat: PASS/FAIL
-Latency: <ms>
-Quota/rate limit: <status>
-Final diagnosis: <one sentence>
+    detecting_document
+    -> sarvam_extraction
+    -> Sarvam job submitted
+    -> polling
+    -> Sarvam completed
+    -> normalizing
+    -> completed
 
-GEMINI
-------
-Key supplied: YES/NO
-Authentication: PASS/FAIL
-Model: <model>
-Model access: PASS/FAIL
-Minimal generation: PASS/FAIL
-Latency: <ms>
-Quota/rate limit: <status>
-Final diagnosis: <one sentence>
+This must NOT occur:
 
-OLLAMA
-------
-Service: PASS/FAIL
-Models discovered: <list>
-Selected model: <model>
-GPU detected: YES/NO
-GPU utilization: <measurement>
-VRAM: <measurement>
-Cold latency: <ms>
-Warm latency: <ms>
-Tokens/sec: <measurement>
-Final diagnosis: <one sentence>
+    sarvam_extraction skipped
+    -> ocr_fallback
+    -> Ollama vision
 
-BHOOMILENS
-----------
-Provider test endpoint: PASS/FAIL
-Frontend test button: PASS/FAIL
-Document pipeline: PASS/FAIL
-Fallback: PASS/FAIL
+If Sarvam genuinely fails, expected order is:
 
-ROOT CAUSE
-----------
-<exact root cause>
+    detecting_document
+    -> sarvam_extraction
+    -> Sarvam failed
+    -> ocr_fallback / ai_extraction
+    -> Ollama vision
+    -> normalizing
+    -> completed
 
-FIXES
------
-<files changed and why>
+## 15. Test the Actual Sarvam Failure Scenario
 
-VERIFICATION
-------------
-<commands and results>
-~~~
+Antigravity must intentionally reproduce the previous CLASSIFICATION_NOT_SUPPORTED error if possible.
 
----
+Record:
+- HTTP status
+- response JSON
+- request parameters except secrets
+- whether schema caused the issue
+- whether language caused the issue
+- whether output_format caused the issue
+- exact current API endpoint
+- whether the endpoint is still supported
 
-# 35. Definition of done
+Then implement the smallest compatible fix.
 
-Do not mark this task complete merely because the UI displays "connected".
+Do not silently swallow the error and route to Ollama.
 
-Done means:
+The log must explicitly state:
 
-~~~
-direct provider request works
-+
-adapter works
-+
-backend test endpoint works
-+
-frontend test works
-+
-production request works
-+
-document pipeline works
-+
-failure states are accurate
-+
-free-tier constraints are respected
-+
-secrets are protected
-+
-Ollama performance is measured
-~~~
+    Sarvam attempted: YES
+    Sarvam failed: YES
+    Reason: <exact reason>
+    Fallback started: YES
 
-The key outcome is **diagnostic certainty**. If Sarvam or Gemini still fails, BhoomiLens must clearly identify whether the cause is the key, project/account, free-tier quota, model access, request schema, network, provider service, or BhoomiLens code.
+## 16. Do Not Couple Provider Settings
+
+The frontend currently sends:
+
+    /cases/{case_id}/analyze?reasoning_provider=ollama
+
+Keep this API contract if possible.
+
+Do NOT reinterpret this query parameter as extraction_provider.
+
+Correct separation:
+
+    reasoning_provider -> reasoning
+    extraction_provider -> automatic policy
+
+If an explicit extraction override is useful, make it a separate parameter. The default must remain:
+
+    if Sarvam key exists -> Sarvam first
+
+## 17. Preserve Mock Mode
+
+Existing mock behavior is used for deterministic testing.
+
+Do not break reasoning_provider=mock.
+
+Mock tests may intentionally bypass external providers. Document this exception.
+
+## 18. Required Files To Inspect/Modify
+
+Inspect before editing:
+- backend/app/services/pipeline.py
+- backend/app/services/fallback_extraction.py
+- backend/app/core/config.py
+- backend/app/api/routes.py
+- backend/app/providers/
+- backend/tests/test_document_pipeline_failures.py
+- backend/tests/test_digitise_and_reporting.py
+- frontend/components/BhoomiConsole.tsx
+
+Likely modified:
+- backend/app/services/pipeline.py
+- backend/app/services/fallback_extraction.py
+- backend/app/services/sarvam_document_ai.py if useful
+- backend/tests/test_document_pipeline_failures.py
+- backend/tests/test_sarvam_extraction.py
+
+Do not make unrelated frontend or reconciliation changes.
+
+## 19. Implementation Sequence
+
+1. Audit current provider routing.
+2. Separate reasoning_provider from extraction_provider.
+3. Force Sarvam first whenever SARVAM_API_KEY exists.
+4. Preserve AI vision fallback after Sarvam failure.
+5. Fix Ollama <think>/JSON parsing.
+6. Add extraction metadata and logging.
+7. Add unit tests.
+8. Run the full backend test suite.
+9. Run the real Udran_Khatoni.pdf E2E test.
+10. Verify logs prove actual provider order.
+11. Verify structured extraction reaches normalization/reconciliation.
+
+## 20. Verification Commands
+
+Use the project's actual virtual environment.
+
+Typical:
+
+    cd /mnt/data/Code/TeamVARS-Bhomi
+    cd backend
+    pytest -q
+    pytest -q tests/test_document_pipeline_failures.py
+    pytest -q tests/test_digitise_and_reporting.py
+
+Ollama:
+
+    curl http://127.0.0.1:11434/api/tags
+    ollama list
+    ollama ps
+
+GPU:
+
+    nvidia-smi
+
+Then run FastAPI and perform the real upload/analyze flow.
+
+Do not declare success from unit tests alone.
+
+## 21. Acceptance Criteria
+
+- [ ] Sarvam is attempted whenever a Sarvam API key is configured.
+- [ ] reasoning_provider=ollama no longer bypasses Sarvam.
+- [ ] Scanned PDFs enter sarvam_extraction before any AI vision fallback.
+- [ ] Successful Sarvam extraction prevents duplicate Ollama/Gemini extraction.
+- [ ] Failed Sarvam extraction triggers AI vision/OCR fallback.
+- [ ] Exact Sarvam failure is logged.
+- [ ] reasoning_provider remains independent from extraction routing.
+- [ ] Ollama <think> responses no longer cause avoidable JSON failures.
+- [ ] Existing mock tests still work.
+- [ ] Unit tests cover Sarvam success and failure.
+- [ ] Udran_Khatoni.pdf is tested end-to-end.
+- [ ] Backend test suite passes.
+- [ ] Final terminal logs prove actual provider order.
+- [ ] No API keys or document contents are leaked in logs.
+
+## 22. Mandatory Final Report From Antigravity
+
+Print:
+
+    BHOOMILENS SARVAM EXTRACTION VERIFICATION
+    ==========================================
+
+    Document:
+    Udran_Khatoni.pdf
+
+    Native text:
+    <CHAR_COUNT>
+
+    Sarvam key configured:
+    YES / NO
+
+    Sarvam extraction attempted:
+    YES / NO
+
+    Sarvam job ID:
+    <job_id or N/A>
+
+    Sarvam result:
+    SUCCESS / FAILED
+
+    Sarvam failure:
+    <exact sanitized error or NONE>
+
+    Fallback provider:
+    <NONE / Ollama / Gemini / other>
+
+    Fallback required:
+    YES / NO
+
+    Final extraction provider:
+    <Sarvam / Ollama / Gemini / ...>
+
+    Reasoning provider:
+    <ollama / gemini / ...>
+
+    Sarvam before fallback:
+    PASS / FAIL
+
+    Duplicate extraction avoided:
+    PASS / FAIL
+
+    Structured extraction:
+    PASS / FAIL
+
+    Normalization:
+    PASS / FAIL
+
+    Reconciliation:
+    PASS / FAIL
+
+    Backend tests:
+    PASS / FAIL
+
+    End-to-end test:
+    PASS / FAIL
+
+    ROOT CAUSE:
+    <one concise paragraph>
+
+    FILES CHANGED:
+    <list>
+
+    FINAL STATUS:
+    PASS / FAIL
+
+Do not report PASS unless the real document flow was executed.
+
+## 23. Non-Negotiable Architectural Constraint
+
+Do not solve this by changing the frontend dropdown to Sarvam.
+
+The backend must enforce Sarvam-first extraction.
+
+Even if the frontend sends:
+
+    reasoning_provider=ollama
+
+the correct architecture is:
+
+    Sarvam Document AI extraction
+            |
+            v
+    structured document
+            |
+            v
+    Ollama reasoning
+
+That separation is the actual fix.
